@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bitladder"
+version = "0.0.1"
+description = "Quantization ladder 32 -> 1 bit, pruning and friends on tiny applied models"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "torch>=2.0",
+    "torchvision>=0.15",
+    "numpy>=1.24",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "matplotlib", "pandas"]
+
+[tool.setuptools.packages.find]
+include = ["bitladder*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

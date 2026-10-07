@@ -1,0 +1,16 @@
+name: bitladder
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+      - --index-url https://download.pytorch.org/whl/cu128
+      - --extra-index-url https://pypi.org/simple
+      - torch
+      - torchvision
+      - numpy
+      - pyyaml
+      - pytest
+      - matplotlib
+      - pandas
