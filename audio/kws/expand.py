@@ -40,7 +40,7 @@ from torch.utils.data import DataLoader
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from audio.kws.data import SILENCE, UNKNOWN, KWSCache, KWSDataset  # noqa: E402
+from audio.kws.data import SILENCE, UNKNOWN, CVNegatives, KWSCache, KWSDataset  # noqa: E402
 from audio.kws.model import DSCNN  # noqa: E402
 from bitladder.cli import add_quant_args, quant_config  # noqa: E402
 from bitladder.measure import count_macs, model_size_report  # noqa: E402
@@ -157,6 +157,14 @@ def frr_at_thresholds(probs: np.ndarray, labels: np.ndarray, word_ids: List[int]
     return out
 
 
+def far_at_thresholds(probs: np.ndarray, labels: np.ndarray, word_ids: List[int], thr: np.ndarray) -> List[float]:
+    out = []
+    for w in word_ids:
+        neg = probs[labels != w, w]
+        out.append(float((neg >= thr[w]).mean()) if len(neg) else float("nan"))
+    return out
+
+
 @torch.no_grad()
 def collect_scores(base: DSCNN, branch: nn.Module, loader: DataLoader, device: torch.device,
                    core_word_ids: List[int], core_thr: np.ndarray
@@ -185,19 +193,32 @@ def collect_scores(base: DSCNN, branch: nn.Module, loader: DataLoader, device: t
 
 
 def frr_at_far(probs: np.ndarray, labels: np.ndarray, n_new: int, far: float,
-               fired: Optional[np.ndarray] = None) -> Dict[str, object]:
-    """Per new word: threshold at ``far`` on non-target samples, then FRR; plus macro FRR.
+               fired: Optional[np.ndarray] = None,
+               neg: Optional[Tuple[np.ndarray, np.ndarray]] = None) -> Dict[str, object]:
+    """Per new word: threshold at ``far``, then FRR on the positives; plus macro FRR.
 
-    With ``fired`` the core-first rule is applied: a sample on which the core fired gets
-    score 0 for every new word (the branch is never consulted).
+    Thresholds come from the non-target samples of ``probs`` itself, or, with ``neg`` =
+    (neg_probs, neg_fired), from an external negative set (Common Voice). With ``fired``
+    the core-first rule is applied: a sample on which the core fired gets score 0 for
+    every new word (the branch is never consulted).
     """
-    s_all = probs.copy()
-    if fired is not None:
-        s_all[fired] = 0.0
+    def gate(p, f):
+        s = p.copy()
+        if f is not None:
+            s[f] = 0.0
+        return s
+
+    s_all = gate(probs, fired)
     ids = list(range(n_new))
-    thr = thresholds_at_far(s_all, labels, ids, far)
+    if neg is None:
+        thr = thresholds_at_far(s_all, labels, ids, far)
+    else:
+        s_neg = gate(neg[0], neg[1] if fired is not None else None)
+        thr = thresholds_at_far(s_neg, np.full(len(s_neg), -1), ids, far)
     frr = frr_at_thresholds(s_all, labels, ids, thr)
-    return {"frr": frr, "thr": thr[:n_new].tolist(), "macro_frr": float(np.nanmean(frr))}
+    far_inset = far_at_thresholds(s_all, labels, ids, thr)
+    return {"frr": frr, "thr": thr[:n_new].tolist(), "macro_frr": float(np.nanmean(frr)),
+            "far_gsc": far_inset}
 
 
 # ----------------------------------------------------------------------------- main
@@ -219,6 +240,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--batch-size", type=int, default=256)
     p.add_argument("--workers", type=int, default=4)
     p.add_argument("--far", type=float, default=0.01)
+    p.add_argument("--neg", default="gsc", choices=["gsc", "cv"],
+                   help="negatives for threshold calibration: other GSC words + silence (gsc) "
+                        "or Common Voice speech windows (cv, needs cv_test.npy in the cache)")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--device", default="auto")
     p.add_argument("--out", default=str(ROOT / "results"))
@@ -260,12 +284,19 @@ def run(args: argparse.Namespace) -> dict:
     # (its keywords vs. everything else except the new words), FAR = args.far per word.
     core_ids = [meta["classes"].index(w) for w in base_words]
     base_view = dict(keywords=base_words, exclude=new_words, seed=args.seed)
-    core_val_p, core_val_y = collect_core(base, mk(KWSDataset(cache, "validation", **base_view), False), device)
-    core_thr = thresholds_at_far(core_val_p, core_val_y, core_ids, args.far)
+    cv_loader = mk(CVNegatives(cache), False) if args.neg == "cv" else None
+    if cv_loader is None:
+        core_cal_p, core_cal_y = collect_core(base, mk(KWSDataset(cache, "validation", **base_view), False), device)
+    else:
+        core_cal_p, _ = collect_core(base, cv_loader, device)
+        core_cal_y = np.full(len(core_cal_p), -1)
+    core_thr = thresholds_at_far(core_cal_p, core_cal_y, core_ids, args.far)
     core_test_p, core_test_y = collect_core(base, mk(KWSDataset(cache, "test", **base_view), False), device)
     core_frr = frr_at_thresholds(core_test_p, core_test_y, core_ids, core_thr)
-    log(f"core FRR@FAR{args.far} on its own words (test): macro={np.nanmean(core_frr):.4f} "
-        + " ".join(f"{w}={f:.3f}" for w, f in zip(base_words, core_frr)))
+    core_far_gsc = far_at_thresholds(core_test_p, core_test_y, core_ids, core_thr)
+    log(f"core thresholds from {args.neg}: FRR@FAR{args.far} on its own words (test) macro={np.nanmean(core_frr):.4f} "
+        + " ".join(f"{w}={f:.3f}" for w, f in zip(base_words, core_frr))
+        + f"; FAR on GSC test negatives at these thresholds macro={np.nanmean(core_far_gsc):.4f}")
 
     if args.mode == "expand":
         branch: nn.Module = ExpansionBranch(meta["channels"], meta["blocks"], args.k, n_new)
@@ -301,9 +332,13 @@ def run(args: argparse.Namespace) -> dict:
             sched.step()
             running += loss.item() * len(y)
             n += len(y)
+        neg = None
+        if cv_loader is not None:
+            cv_p, _, cv_fired = collect_scores(base, branch, cv_loader, device, core_ids, core_thr)
+            neg = (cv_p, cv_fired)
         probs, labels, fired = collect_scores(base, branch, val_loader, device, core_ids, core_thr)
-        val = frr_at_far(probs, labels, n_new, args.far, fired)
-        val_u = frr_at_far(probs, labels, n_new, args.far)
+        val = frr_at_far(probs, labels, n_new, args.far, fired, neg)
+        val_u = frr_at_far(probs, labels, n_new, args.far, None, neg)
         rec = {"epoch": epoch, "train_loss": running / max(n, 1),
                "val_macro_frr": val["macro_frr"], "val_macro_frr_ungated": val_u["macro_frr"]}
         history.append(rec)
@@ -312,8 +347,8 @@ def run(args: argparse.Namespace) -> dict:
     train_time = time.time() - t0
 
     probs, labels, fired = collect_scores(base, branch, test_loader, device, core_ids, core_thr)
-    test = frr_at_far(probs, labels, n_new, args.far, fired)
-    test_u = frr_at_far(probs, labels, n_new, args.far)
+    test = frr_at_far(probs, labels, n_new, args.far, fired, neg)
+    test_u = frr_at_far(probs, labels, n_new, args.far, None, neg)
     # How often the frozen core fires (above its thresholds) on new-word clips: the branch
     # is never consulted there, so this is a floor for the gated FRR.
     new_mask = labels < n_new

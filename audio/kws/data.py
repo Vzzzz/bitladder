@@ -45,6 +45,8 @@ class KWSCache:
         tp = self.path / "test_index.json"
         self.test_index = json.loads(tp.read_text()) if tp.exists() else None
         self.test_feats = np.load(self.path / "test_feats.npy", mmap_mode="r") if tp.exists() else None
+        cv = self.path / "cv_test.npy"
+        self.cv_feats = np.load(cv, mmap_mode="r") if cv.exists() else None
 
     @property
     def all_words(self) -> List[str]:
@@ -114,6 +116,21 @@ class KWSDataset(Dataset):
     def label_counts(self) -> dict:
         counts = np.bincount([it[2] for it in self.items], minlength=len(self.classes))
         return dict(zip(self.classes, counts.tolist()))
+
+
+class CVNegatives(Dataset):
+    """1 s windows of Common Voice speech (see cv_negatives.py); label -1 = no keyword."""
+
+    def __init__(self, cache: KWSCache):
+        if cache.cv_feats is None:
+            raise FileNotFoundError("cache has no cv_test.npy; run audio/kws/cv_negatives.py")
+        self.cache = cache
+
+    def __len__(self) -> int:
+        return self.cache.cv_feats.shape[0]
+
+    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, int]:
+        return self.cache.normalize(self.cache.cv_feats[idx]).unsqueeze(0), -1
 
 
 class KWSOfficialTest(Dataset):

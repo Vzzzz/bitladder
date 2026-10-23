@@ -17,6 +17,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=7", "matplotlib", "pandas"]
+audio = ["soundfile>=0.12", "scipy>=1.10"]  # mp3 decoding + resampling for cv_negatives.py
 
 [tool.setuptools.packages.find]
 include = ["bitladder*"]
