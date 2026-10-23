@@ -235,6 +235,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--unknown-ratio", type=float, default=1.0,
                    help="background clips per new-word clip (paper: new commands plus background)")
     p.add_argument("--silence-ratio", type=float, default=0.1)
+    p.add_argument("--cv-unknown", type=int, default=0, help="Common Voice windows added to the branch background (train)")
     p.add_argument("--epochs", type=int, default=10)
     p.add_argument("--lr", type=float, default=3e-3)
     p.add_argument("--batch-size", type=int, default=256)
@@ -268,7 +269,7 @@ def run(args: argparse.Namespace) -> dict:
     cache = KWSCache(args.cache)
     # Branch data: new words positive; everything else (base words included) is background.
     ds_kw = dict(keywords=new_words, unknown_ratio=args.unknown_ratio,
-                 silence_ratio=args.silence_ratio, seed=args.seed)
+                 silence_ratio=args.silence_ratio, seed=args.seed, cv_unknown=args.cv_unknown)
     train_ds = KWSDataset(cache, "train", augment=True, **ds_kw)
     val_ds = KWSDataset(cache, "validation", **ds_kw)
     test_ds = KWSDataset(cache, "test", **ds_kw)

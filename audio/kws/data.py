@@ -47,6 +47,8 @@ class KWSCache:
         self.test_feats = np.load(self.path / "test_feats.npy", mmap_mode="r") if tp.exists() else None
         cv = self.path / "cv_test.npy"
         self.cv_feats = np.load(cv, mmap_mode="r") if cv.exists() else None
+        cvt = self.path / "cv_train.npy"
+        self.cv_train = np.load(cvt, mmap_mode="r") if cvt.exists() else None
 
     @property
     def all_words(self) -> List[str]:
@@ -73,7 +75,10 @@ class KWSDataset(Dataset):
 
     def __init__(self, cache: KWSCache, split: str = "train", keywords: Sequence[str] = KEYWORDS10,
                  exclude: Iterable[str] = (), unknown_ratio: float = 0.1, silence_ratio: float = 0.1,
-                 seed: int = 0, augment: bool = False):
+                 seed: int = 0, augment: bool = False, cv_unknown: int = 0):
+        """``cv_unknown``: number of Common Voice speech windows (cv_train.npy) added to the
+        ``_unknown_`` class of the train split; the validation split gets a tenth of that
+        from a disjoint slice. The test split never uses them."""
         self.cache = cache
         self.classes = class_names(keywords)
         self.augment = augment
@@ -101,13 +106,23 @@ class KWSDataset(Dataset):
             + [("feats", int(i), self.classes.index(UNKNOWN)) for i in unk_idx]
             + [("silence", int(i), self.classes.index(SILENCE)) for i in sil]
         )
+        if cv_unknown and split != "test":
+            if cache.cv_train is None:
+                raise FileNotFoundError("cache has no cv_train.npy; run cv_negatives.py --split train")
+            n_cv = cache.cv_train.shape[0]
+            n_val = n_cv // 10
+            lo, hi = (n_val, n_cv) if split == "train" else (0, n_val)
+            n_take = cv_unknown if split == "train" else max(cv_unknown // 10, 1)
+            cv_idx = rng.permutation(np.arange(lo, hi))[:n_take]
+            self.items += [("cv", int(i), self.classes.index(UNKNOWN)) for i in cv_idx]
 
     def __len__(self) -> int:
         return len(self.items)
 
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, int]:
         src, i, label = self.items[idx]
-        arr = self.cache.feats[i] if src == "feats" else self.cache.silence[i]
+        arr = (self.cache.feats[i] if src == "feats" else
+               self.cache.silence[i] if src == "silence" else self.cache.cv_train[i])
         x = self.cache.normalize(arr)
         if self.augment:
             x = spec_augment(x, self.rng)

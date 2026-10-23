@@ -37,6 +37,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--exclude", default="", help="comma-separated words removed from the pool entirely")
     p.add_argument("--unknown-ratio", type=float, default=0.1)
     p.add_argument("--silence-ratio", type=float, default=0.1)
+    p.add_argument("--cv-unknown", type=int, default=0,
+                   help="Common Voice speech windows added to _unknown_ in train (needs cv_train.npy)")
     p.add_argument("--channels", type=int, default=64)
     p.add_argument("--blocks", type=int, default=4)
     p.add_argument("--epochs", type=int, default=30)
@@ -64,7 +66,7 @@ def run(args: argparse.Namespace) -> dict:
 
     cache = KWSCache(args.cache)
     ds_kw = dict(keywords=keywords, exclude=exclude, unknown_ratio=args.unknown_ratio,
-                 silence_ratio=args.silence_ratio, seed=args.seed)
+                 silence_ratio=args.silence_ratio, seed=args.seed, cv_unknown=args.cv_unknown)
     train_ds = KWSDataset(cache, "train", augment=not args.no_augment, **ds_kw)
     val_ds = KWSDataset(cache, "validation", **ds_kw)
     test_ds = KWSDataset(cache, "test", **ds_kw)
