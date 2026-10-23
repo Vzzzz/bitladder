@@ -23,17 +23,17 @@ enhancement на минимуме параметров (смартфон, Jetson
 
 **Окружение.** Рабочая копия и обучение в WSL Ubuntu-22.04: `~/bitladder`, свой `.venv`
 (Python 3.10, torch 2.14 cu130), GPU RTX 3080 Laptop 8 ГБ, toolkit CUDA 13.3.
-Windows-копия `C:\Users\valer\git\bitladder` служит зеркалом для документации. Источник
-правды: приватный GitHub `Vzzzz/bitladder` (по SSH). Поток: коммит в любой копии → push →
-в другой `git pull --ff-only`. В клоне WSL нельзя запускать `git clean` / `reset --hard`
-(в нём живут venv, данные, чекпоинты). Перед GPU-работой в WSL остановить стенд
-skull-assistant: `systemctl --user stop skull.target` (его ollama держит ~4 ГБ VRAM).
-Окружение skull-assistant (`~/skull-assistant/.venv`) не трогать.
+Windows-копия репозитория служит зеркалом для документации. Источник правды: GitHub
+(origin по SSH). Поток: коммит в любой копии → push → в другой `git pull --ff-only`.
+В клоне WSL нельзя запускать `git clean` / `reset --hard` (в нём живут venv, данные,
+чекпоинты). Перед GPU-работой в WSL остановить стенд skull-assistant:
+`systemctl --user stop skull.target` (его ollama держит ~4 ГБ VRAM). Окружение
+skull-assistant не трогать. Длинные свипы можно гонять в Google Colab: `colab/kws.ipynb`.
 
 **Данные** в `~/bitladder/data/` (gitignored): `speech_commands_v2/` (105 835 wav, 35 слов
 плюс `_background_noise_`), `speech_commands_test_v2/` (официальный тест на 12 классов,
 4 890 wav), `kws_cache/` (log-mel float16 для всех клипов, строится `audio/kws/cache.py`
-за две минуты). Архив Common Voice 27.0 ru лежит в `C:\Users\valer\Downloads`, не распакован.
+за две минуты). Архив Common Voice 27.0 ru скачан локально, не распакован.
 
 **Что работает (2026-10-23).** 21 тест зелёный. `audio/kws/run.py`: DS-CNN 64×4
 (23k параметров, 10.6 MMAC), 30 эпох по 4 с, 12 классов: 95.0 % на официальном тесте
