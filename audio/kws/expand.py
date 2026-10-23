@@ -208,7 +208,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--new", required=True, help="comma-separated new keywords")
     p.add_argument("--mode", default="expand", choices=["expand", "separate", "head"])
     p.add_argument("--k", type=int, default=8, help="branch width (channels per expand block)")
-    p.add_argument("--sep-channels", type=int, default=16, help="channels of the separate baseline")
+    p.add_argument("--sep-channels", type=int, default=40, help="channels of the separate baseline (40x2 ~ 6k params)")
     p.add_argument("--sep-blocks", type=int, default=2)
     p.add_argument("--cache", default=str(ROOT / "data" / "kws_cache"))
     p.add_argument("--unknown-ratio", type=float, default=1.0,
@@ -239,7 +239,6 @@ def run(args: argparse.Namespace) -> dict:
     new_words = [w for w in args.new.split(",") if w]
     if set(new_words) & set(base_words):
         raise ValueError("new words overlap the base keywords")
-    background_ids = [meta["classes"].index(SILENCE), meta["classes"].index(UNKNOWN)]
     n_new = len(new_words)
 
     cache = KWSCache(args.cache)
