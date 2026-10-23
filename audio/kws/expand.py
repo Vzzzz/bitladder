@@ -167,19 +167,22 @@ def far_at_thresholds(probs: np.ndarray, labels: np.ndarray, word_ids: List[int]
 
 @torch.no_grad()
 def collect_scores(base: DSCNN, branch: nn.Module, loader: DataLoader, device: torch.device,
-                   core_word_ids: List[int], core_thr: np.ndarray
-                   ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Per-sample new-word probabilities (ungated), labels, and whether the core fired.
+                   core_word_ids: List[int], core_thr: np.ndarray, background_ids: List[int]
+                   ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Per-sample: new-word probabilities (ungated), labels, whether the core fired (hard
+    core-first rule), and the core's background probability (soft gate).
 
-    Core-first rule as in the paper: the core "outputs a keyword" only when the probability
-    of one of its words exceeds that word's own threshold (calibrated at the target FAR);
-    otherwise it outputs background and the new head is consulted.
+    Hard rule as in the paper: the core "outputs a keyword" only when the probability of
+    one of its words exceeds that word's own threshold (calibrated at the target FAR);
+    otherwise it outputs background and the new head is consulted. Soft gate: new-word
+    score = p_branch(word) * p_core(background), no core thresholds needed.
     """
     base.eval()
     branch.eval()
     thr_t = torch.tensor(core_thr, dtype=torch.float32, device=device)
     ids = torch.tensor(core_word_ids, device=device)
-    probs, labels, fired = [], [], []
+    bg_ids = torch.tensor(background_ids, device=device)
+    probs, labels, fired, bg = [], [], [], []
     for x, y in loader:
         x = x.to(device)
         core_logits, taps = base_forward(base, x)
@@ -189,31 +192,39 @@ def collect_scores(base: DSCNN, branch: nn.Module, loader: DataLoader, device: t
         probs.append(p.cpu().numpy())
         labels.append(y.numpy())
         fired.append(fires.cpu().numpy())
-    return np.concatenate(probs), np.concatenate(labels), np.concatenate(fired)
+        bg.append(core_p[:, bg_ids].sum(dim=1).cpu().numpy())
+    return np.concatenate(probs), np.concatenate(labels), np.concatenate(fired), np.concatenate(bg)
 
 
-def frr_at_far(probs: np.ndarray, labels: np.ndarray, n_new: int, far: float,
-               fired: Optional[np.ndarray] = None,
-               neg: Optional[Tuple[np.ndarray, np.ndarray]] = None) -> Dict[str, object]:
+Scores = Tuple[np.ndarray, np.ndarray, np.ndarray]  # (branch probs, core fired, core background prob)
+
+
+def gated(scores: Scores, gate: str) -> np.ndarray:
+    """New-word scores under a gating rule: none | hard (core-first) | soft (multiply)."""
+    p, fired, bg = scores
+    s = p.copy()
+    if gate == "hard":
+        s[fired] = 0.0
+    elif gate == "soft":
+        s = s * bg[:, None]
+    elif gate != "none":
+        raise ValueError(gate)
+    return s
+
+
+def frr_at_far(scores: Scores, labels: np.ndarray, n_new: int, far: float, gate: str = "none",
+               neg: Optional[Scores] = None) -> Dict[str, object]:
     """Per new word: threshold at ``far``, then FRR on the positives; plus macro FRR.
 
-    Thresholds come from the non-target samples of ``probs`` itself, or, with ``neg`` =
-    (neg_probs, neg_fired), from an external negative set (Common Voice). With ``fired``
-    the core-first rule is applied: a sample on which the core fired gets score 0 for
-    every new word (the branch is never consulted).
+    Thresholds come from the non-target samples of the set itself, or, with ``neg``,
+    from an external negative set (Common Voice), under the same gating rule.
     """
-    def gate(p, f):
-        s = p.copy()
-        if f is not None:
-            s[f] = 0.0
-        return s
-
-    s_all = gate(probs, fired)
+    s_all = gated(scores, gate)
     ids = list(range(n_new))
     if neg is None:
         thr = thresholds_at_far(s_all, labels, ids, far)
     else:
-        s_neg = gate(neg[0], neg[1] if fired is not None else None)
+        s_neg = gated(neg, gate)
         thr = thresholds_at_far(s_neg, np.full(len(s_neg), -1), ids, far)
     frr = frr_at_thresholds(s_all, labels, ids, thr)
     far_inset = far_at_thresholds(s_all, labels, ids, thr)
@@ -284,6 +295,7 @@ def run(args: argparse.Namespace) -> dict:
     # Core thresholds: calibrated once on the base's own view of the validation split
     # (its keywords vs. everything else except the new words), FAR = args.far per word.
     core_ids = [meta["classes"].index(w) for w in base_words]
+    background_ids = [meta["classes"].index(SILENCE), meta["classes"].index(UNKNOWN)]
     base_view = dict(keywords=base_words, exclude=new_words, seed=args.seed)
     cv_loader = mk(CVNegatives(cache), False) if args.neg == "cv" else None
     if cv_loader is None:
@@ -333,25 +345,28 @@ def run(args: argparse.Namespace) -> dict:
             sched.step()
             running += loss.item() * len(y)
             n += len(y)
-        neg = None
-        if cv_loader is not None:
-            cv_p, _, cv_fired = collect_scores(base, branch, cv_loader, device, core_ids, core_thr)
-            neg = (cv_p, cv_fired)
-        probs, labels, fired = collect_scores(base, branch, val_loader, device, core_ids, core_thr)
-        val = frr_at_far(probs, labels, n_new, args.far, fired, neg)
-        val_u = frr_at_far(probs, labels, n_new, args.far, None, neg)
+        def scores_of(loader):
+            p, y, fired, bg = collect_scores(base, branch, loader, device, core_ids, core_thr, background_ids)
+            return (p, fired, bg), y
+
+        neg = scores_of(cv_loader)[0] if cv_loader is not None else None
+        sc, labels = scores_of(val_loader)
+        val = {g: frr_at_far(sc, labels, n_new, args.far, g, neg) for g in ("hard", "soft", "none")}
         rec = {"epoch": epoch, "train_loss": running / max(n, 1),
-               "val_macro_frr": val["macro_frr"], "val_macro_frr_ungated": val_u["macro_frr"]}
+               "val_macro_frr": val["hard"]["macro_frr"], "val_macro_frr_soft": val["soft"]["macro_frr"],
+               "val_macro_frr_ungated": val["none"]["macro_frr"]}
         history.append(rec)
-        log(f"epoch={epoch} loss={rec['train_loss']:.4f} val_macro_frr@far{args.far}={val['macro_frr']:.4f} "
-            f"(ungated {val_u['macro_frr']:.4f})")
+        log(f"epoch={epoch} loss={rec['train_loss']:.4f} val_macro_frr@far{args.far}: "
+            f"hard={rec['val_macro_frr']:.4f} soft={rec['val_macro_frr_soft']:.4f} none={rec['val_macro_frr_ungated']:.4f}")
     train_time = time.time() - t0
 
-    probs, labels, fired = collect_scores(base, branch, test_loader, device, core_ids, core_thr)
-    test = frr_at_far(probs, labels, n_new, args.far, fired, neg)
-    test_u = frr_at_far(probs, labels, n_new, args.far, None, neg)
+    sc, labels = scores_of(test_loader)
+    test = frr_at_far(sc, labels, n_new, args.far, "hard", neg)
+    test_s = frr_at_far(sc, labels, n_new, args.far, "soft", neg)
+    test_u = frr_at_far(sc, labels, n_new, args.far, "none", neg)
     # How often the frozen core fires (above its thresholds) on new-word clips: the branch
-    # is never consulted there, so this is a floor for the gated FRR.
+    # is never consulted there, so this is a floor for the hard-gated FRR.
+    fired = sc[1]
     new_mask = labels < n_new
     core_fires_on_new = float(fired[new_mask].mean()) if new_mask.any() else float("nan")
 
@@ -370,6 +385,9 @@ def run(args: argparse.Namespace) -> dict:
         "test_frr": dict(zip(new_words, test["frr"])), "test_thr": dict(zip(new_words, test["thr"])),
         "test_macro_frr": test["macro_frr"],
         "test_frr_ungated": dict(zip(new_words, test_u["frr"])), "test_macro_frr_ungated": test_u["macro_frr"],
+        "test_far_gsc_ungated": dict(zip(new_words, test_u["far_gsc"])),
+        "test_frr_soft": dict(zip(new_words, test_s["frr"])), "test_macro_frr_soft": test_s["macro_frr"],
+        "neg": args.neg, "cv_unknown": args.cv_unknown,
         "core_fires_on_new": core_fires_on_new,
         "core_frr": dict(zip(base_words, core_frr)), "core_macro_frr": float(np.nanmean(core_frr)),
         "core_thr": dict(zip(base_words, core_thr[core_ids].tolist())),
@@ -377,8 +395,8 @@ def run(args: argparse.Namespace) -> dict:
     }
     (out_dir / f"{name}.json").write_text(json.dumps(result, indent=2))
     per_word = " ".join(f"{w}={f:.4f}" for w, f in zip(new_words, test["frr"]))
-    log(f"RESULT {name}: macro_FRR@FAR{args.far}={test['macro_frr']:.4f} [{per_word}] "
-        f"ungated={test_u['macro_frr']:.4f} core_fires_on_new={core_fires_on_new:.3f} "
+    log(f"RESULT {name}: macro_FRR@FAR{args.far} hard={test['macro_frr']:.4f} [{per_word}] "
+        f"soft={test_s['macro_frr']:.4f} none={test_u['macro_frr']:.4f} core_fires_on_new={core_fires_on_new:.3f} "
         f"branch_params={n_branch} branch_bytes={size['total_bytes']} train={train_time:.0f}s")
     return result
 
