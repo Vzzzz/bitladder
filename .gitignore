@@ -12,3 +12,5 @@ results/*
 *.onnx
 .vscode/
 .idea/
+.venv/
+venv/
