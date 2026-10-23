@@ -129,35 +129,75 @@ def branch_logits(branch: nn.Module, taps: List[torch.Tensor], x: torch.Tensor) 
 
 # ----------------------------------------------------------------------------- protocol
 @torch.no_grad()
+def collect_core(base: DSCNN, loader: DataLoader, device: torch.device) -> Tuple[np.ndarray, np.ndarray]:
+    """Softmax probabilities of the frozen core and labels."""
+    base.eval()
+    probs, labels = [], []
+    for x, y in loader:
+        logits, _ = base_forward(base, x.to(device))
+        probs.append(F.softmax(logits, dim=1).cpu().numpy())
+        labels.append(y.numpy())
+    return np.concatenate(probs), np.concatenate(labels)
+
+
+def thresholds_at_far(probs: np.ndarray, labels: np.ndarray, word_ids: List[int], far: float) -> np.ndarray:
+    """Per word: the score threshold that gives ``far`` false accepts on all non-target samples."""
+    thr = np.ones(probs.shape[1], dtype=np.float64)
+    for w in word_ids:
+        neg = probs[labels != w, w]
+        thr[w] = float(np.quantile(neg, 1.0 - far)) if len(neg) else 1.0
+    return thr
+
+
+def frr_at_thresholds(probs: np.ndarray, labels: np.ndarray, word_ids: List[int], thr: np.ndarray) -> List[float]:
+    out = []
+    for w in word_ids:
+        pos = probs[labels == w, w]
+        out.append(float((pos < thr[w]).mean()) if len(pos) else float("nan"))
+    return out
+
+
+@torch.no_grad()
 def collect_scores(base: DSCNN, branch: nn.Module, loader: DataLoader, device: torch.device,
-                   background_ids: List[int]) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Per-sample: new-word probabilities gated by the core-first rule, labels, core argmax."""
+                   core_word_ids: List[int], core_thr: np.ndarray
+                   ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Per-sample new-word probabilities (ungated), labels, and whether the core fired.
+
+    Core-first rule as in the paper: the core "outputs a keyword" only when the probability
+    of one of its words exceeds that word's own threshold (calibrated at the target FAR);
+    otherwise it outputs background and the new head is consulted.
+    """
     base.eval()
     branch.eval()
-    bg = torch.tensor(background_ids, device=device)
-    probs, labels, cores = [], [], []
+    thr_t = torch.tensor(core_thr, dtype=torch.float32, device=device)
+    ids = torch.tensor(core_word_ids, device=device)
+    probs, labels, fired = [], [], []
     for x, y in loader:
         x = x.to(device)
         core_logits, taps = base_forward(base, x)
-        core = core_logits.argmax(1)
+        core_p = F.softmax(core_logits, dim=1)
+        fires = (core_p[:, ids] > thr_t[ids]).any(dim=1)
         p = F.softmax(branch_logits(branch, taps, x), dim=1)
-        gate = torch.isin(core, bg).float().unsqueeze(1)
-        probs.append((p * gate).cpu().numpy())
+        probs.append(p.cpu().numpy())
         labels.append(y.numpy())
-        cores.append(core.cpu().numpy())
-    return np.concatenate(probs), np.concatenate(labels), np.concatenate(cores)
+        fired.append(fires.cpu().numpy())
+    return np.concatenate(probs), np.concatenate(labels), np.concatenate(fired)
 
 
-def frr_at_far(probs: np.ndarray, labels: np.ndarray, n_new: int, far: float = 0.01) -> Dict[str, object]:
-    """Per new word: threshold at the given FAR over all non-target samples, then FRR. Plus macro FRR."""
-    frr, thr = [], []
-    for w in range(n_new):
-        s = probs[:, w]
-        neg, pos = s[labels != w], s[labels == w]
-        t = float(np.quantile(neg, 1.0 - far)) if len(neg) else 1.0
-        frr.append(float((pos < t).mean()) if len(pos) else float("nan"))
-        thr.append(t)
-    return {"frr": frr, "thr": thr, "macro_frr": float(np.nanmean(frr))}
+def frr_at_far(probs: np.ndarray, labels: np.ndarray, n_new: int, far: float,
+               fired: Optional[np.ndarray] = None) -> Dict[str, object]:
+    """Per new word: threshold at ``far`` on non-target samples, then FRR; plus macro FRR.
+
+    With ``fired`` the core-first rule is applied: a sample on which the core fired gets
+    score 0 for every new word (the branch is never consulted).
+    """
+    s_all = probs.copy()
+    if fired is not None:
+        s_all[fired] = 0.0
+    ids = list(range(n_new))
+    thr = thresholds_at_far(s_all, labels, ids, far)
+    frr = frr_at_thresholds(s_all, labels, ids, thr)
+    return {"frr": frr, "thr": thr[:n_new].tolist(), "macro_frr": float(np.nanmean(frr))}
 
 
 # ----------------------------------------------------------------------------- main
@@ -217,6 +257,17 @@ def run(args: argparse.Namespace) -> dict:
 
     train_loader, val_loader, test_loader = mk(train_ds, True), mk(val_ds, False), mk(test_ds, False)
 
+    # Core thresholds: calibrated once on the base's own view of the validation split
+    # (its keywords vs. everything else except the new words), FAR = args.far per word.
+    core_ids = [meta["classes"].index(w) for w in base_words]
+    base_view = dict(keywords=base_words, exclude=new_words, seed=args.seed)
+    core_val_p, core_val_y = collect_core(base, mk(KWSDataset(cache, "validation", **base_view), False), device)
+    core_thr = thresholds_at_far(core_val_p, core_val_y, core_ids, args.far)
+    core_test_p, core_test_y = collect_core(base, mk(KWSDataset(cache, "test", **base_view), False), device)
+    core_frr = frr_at_thresholds(core_test_p, core_test_y, core_ids, core_thr)
+    log(f"core FRR@FAR{args.far} on its own words (test): macro={np.nanmean(core_frr):.4f} "
+        + " ".join(f"{w}={f:.3f}" for w, f in zip(base_words, core_frr)))
+
     if args.mode == "expand":
         branch: nn.Module = ExpansionBranch(meta["channels"], meta["blocks"], args.k, n_new)
     elif args.mode == "head":
@@ -251,18 +302,23 @@ def run(args: argparse.Namespace) -> dict:
             sched.step()
             running += loss.item() * len(y)
             n += len(y)
-        probs, labels, _ = collect_scores(base, branch, val_loader, device, background_ids)
-        val = frr_at_far(probs, labels, n_new, args.far)
-        rec = {"epoch": epoch, "train_loss": running / max(n, 1), "val_macro_frr": val["macro_frr"]}
+        probs, labels, fired = collect_scores(base, branch, val_loader, device, core_ids, core_thr)
+        val = frr_at_far(probs, labels, n_new, args.far, fired)
+        val_u = frr_at_far(probs, labels, n_new, args.far)
+        rec = {"epoch": epoch, "train_loss": running / max(n, 1),
+               "val_macro_frr": val["macro_frr"], "val_macro_frr_ungated": val_u["macro_frr"]}
         history.append(rec)
-        log(f"epoch={epoch} loss={rec['train_loss']:.4f} val_macro_frr@far{args.far}={val['macro_frr']:.4f}")
+        log(f"epoch={epoch} loss={rec['train_loss']:.4f} val_macro_frr@far{args.far}={val['macro_frr']:.4f} "
+            f"(ungated {val_u['macro_frr']:.4f})")
     train_time = time.time() - t0
 
-    probs, labels, cores = collect_scores(base, branch, test_loader, device, background_ids)
-    test = frr_at_far(probs, labels, n_new, args.far)
-    # How often the frozen core already fires on new-word clips (it must say background for the branch to act).
+    probs, labels, fired = collect_scores(base, branch, test_loader, device, core_ids, core_thr)
+    test = frr_at_far(probs, labels, n_new, args.far, fired)
+    test_u = frr_at_far(probs, labels, n_new, args.far)
+    # How often the frozen core fires (above its thresholds) on new-word clips: the branch
+    # is never consulted there, so this is a floor for the gated FRR.
     new_mask = labels < n_new
-    core_fires_on_new = float(np.mean(~np.isin(cores[new_mask], background_ids))) if new_mask.any() else float("nan")
+    core_fires_on_new = float(fired[new_mask].mean()) if new_mask.any() else float("nan")
 
     size = model_size_report(branch)
     macs = count_macs(branch, (1, cache.frames, cache.n_mels)) if args.mode == "separate" else None
@@ -277,14 +333,18 @@ def run(args: argparse.Namespace) -> dict:
         "branch_macs": None if macs is None else sum(macs.values()),
         "far": args.far,
         "test_frr": dict(zip(new_words, test["frr"])), "test_thr": dict(zip(new_words, test["thr"])),
-        "test_macro_frr": test["macro_frr"], "core_fires_on_new": core_fires_on_new,
+        "test_macro_frr": test["macro_frr"],
+        "test_frr_ungated": dict(zip(new_words, test_u["frr"])), "test_macro_frr_ungated": test_u["macro_frr"],
+        "core_fires_on_new": core_fires_on_new,
+        "core_frr": dict(zip(base_words, core_frr)), "core_macro_frr": float(np.nanmean(core_frr)),
+        "core_thr": dict(zip(base_words, core_thr[core_ids].tolist())),
         "epochs": args.epochs, "seed": args.seed, "train_time_s": train_time, "history": history,
     }
     (out_dir / f"{name}.json").write_text(json.dumps(result, indent=2))
     per_word = " ".join(f"{w}={f:.4f}" for w, f in zip(new_words, test["frr"]))
     log(f"RESULT {name}: macro_FRR@FAR{args.far}={test['macro_frr']:.4f} [{per_word}] "
-        f"core_fires_on_new={core_fires_on_new:.3f} branch_params={n_branch} "
-        f"branch_bytes={size['total_bytes']} train={train_time:.0f}s")
+        f"ungated={test_u['macro_frr']:.4f} core_fires_on_new={core_fires_on_new:.3f} "
+        f"branch_params={n_branch} branch_bytes={size['total_bytes']} train={train_time:.0f}s")
     return result
 
 
