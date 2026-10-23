@@ -1,6 +1,6 @@
 # Железо
 
-## Jetson Orin Nano Developer Kit (Костян)
+## Jetson Orin Nano Developer Kit ([Костян](https://github.com/Vzzzz/skull-assistant/))
 
 Стандартная плата-носитель NVIDIA. Проверено по документации и форуму 2026-10-07.
 

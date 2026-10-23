@@ -25,7 +25,8 @@ results/              артефакты прогонов (в git не вход�
 
 - [docs/plan.md](docs/plan.md): цели, вопросы исследования, методы, метрики, фазы.
 - [docs/decision-log.md](docs/decision-log.md): журнал решений в формате ADR.
-- [docs/hardware.md](docs/hardware.md): Jetson, микроконтроллер, аудио для Костяна.
+- [docs/hardware.md](docs/hardware.md): Jetson, микроконтроллер, аудио для
+  [Костяна](https://github.com/Vzzzz/skull-assistant/), голосового ассистента, ради которого делается wake word.
 - [docs/references.md](docs/references.md): статьи и инструменты.
 
 ## Быстрый старт
