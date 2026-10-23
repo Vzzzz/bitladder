@@ -1,88 +1,135 @@
-"""Google Speech Commands v2 with the official 12-class protocol.
+"""Speech Commands v2 datasets on top of the feature cache (see cache.py).
 
-Not yet exercised on real data. Expects the extracted archive at ``root``:
-root/<word>/<file>.wav, root/_background_noise_/*.wav, root/validation_list.txt,
-root/testing_list.txt.
+Protocol follows the TensorFlow / Hello Edge recipe: ``keywords`` are the positive
+classes, every other word is ``_unknown_`` (subsampled to ``unknown_ratio`` of the
+keyword count), and ``_silence_`` clips are low-gain background noise. Words listed in
+``exclude`` are removed from the pool entirely (used to hold out "new" words for the
+modular-expansion experiment, P-001).
+
+Splits come from the official validation_list / testing_list. The official test set
+archive (speech_commands_test_set_v0.02) is exposed separately by ``KWSOfficialTest``;
+it already contains balanced ``_silence_`` and ``_unknown_`` folders.
 """
 
 from __future__ import annotations
 
-import random
-import wave
+import json
 from pathlib import Path
-from typing import List, Optional, Sequence, Tuple
+from typing import Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-KEYWORDS = ["yes", "no", "up", "down", "left", "right", "on", "off", "stop", "go"]
+KEYWORDS10 = ["yes", "no", "up", "down", "left", "right", "on", "off", "stop", "go"]
 SILENCE, UNKNOWN = "_silence_", "_unknown_"
-CLASSES = KEYWORDS + [SILENCE, UNKNOWN]
-SAMPLE_RATE = 16000
-CLIP_SAMPLES = SAMPLE_RATE  # 1 second
+SPLITS = {"train": 0, "validation": 1, "test": 2}
 
 
-def read_wav(path: Path) -> np.ndarray:
-    """16-bit PCM mono WAV -> float32 in [-1, 1]."""
-    with wave.open(str(path), "rb") as w:
-        assert w.getsampwidth() == 2 and w.getnchannels() == 1, path
-        frames = w.readframes(w.getnframes())
-    return np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
+def class_names(keywords: Sequence[str]) -> List[str]:
+    return list(keywords) + [SILENCE, UNKNOWN]
 
 
-def _fit_length(x: np.ndarray, n: int = CLIP_SAMPLES) -> np.ndarray:
-    if len(x) >= n:
-        return x[:n]
-    return np.pad(x, (0, n - len(x)))
+class KWSCache:
+    """Memory-mapped feature cache produced by cache.py."""
+
+    def __init__(self, path: str = "data/kws_cache"):
+        self.path = Path(path)
+        self.index = json.loads((self.path / "index.json").read_text())
+        self.feats = np.load(self.path / "feats.npy", mmap_mode="r")
+        self.silence = np.load(self.path / "silence.npy", mmap_mode="r")
+        self.words = np.array(self.index["words"])
+        self.split = np.array(self.index["split"])
+        self.mean, self.std = self.index["mean"], self.index["std"]
+        self.frames, self.n_mels = self.index["frames"], self.index["n_mels"]
+        tp = self.path / "test_index.json"
+        self.test_index = json.loads(tp.read_text()) if tp.exists() else None
+        self.test_feats = np.load(self.path / "test_feats.npy", mmap_mode="r") if tp.exists() else None
+
+    @property
+    def all_words(self) -> List[str]:
+        return sorted(set(self.words.tolist()))
+
+    def normalize(self, x: np.ndarray) -> torch.Tensor:
+        return (torch.from_numpy(np.asarray(x, dtype=np.float32)) - self.mean) / self.std
 
 
-class SpeechCommands(Dataset):
-    """split in {train, validation, test}. Returns (waveform[16000], label_index)."""
+def spec_augment(x: torch.Tensor, rng: np.random.Generator, max_t: int = 10, max_f: int = 6) -> torch.Tensor:
+    """One time mask and one frequency mask, in place. x: (frames, n_mels)."""
+    T, F = x.shape
+    t = int(rng.integers(0, max_t + 1))
+    t0 = int(rng.integers(0, max(T - t, 1)))
+    x[t0:t0 + t, :] = 0.0
+    f = int(rng.integers(0, max_f + 1))
+    f0 = int(rng.integers(0, max(F - f, 1)))
+    x[:, f0:f0 + f] = 0.0
+    return x
 
-    def __init__(self, root: str, split: str = "train", unknown_ratio: float = 0.1,
-                 silence_ratio: float = 0.1, seed: int = 0):
-        self.root = Path(root)
-        self.split = split
-        rng = random.Random(seed)
-        val = set((self.root / "validation_list.txt").read_text().split())
-        test = set((self.root / "testing_list.txt").read_text().split())
 
-        items: List[Tuple[Path, int]] = []
-        unknown: List[Path] = []
-        for wav in sorted(self.root.glob("*/*.wav")):
-            word = wav.parent.name
-            if word == "_background_noise_":
-                continue
-            rel = f"{word}/{wav.name}"
-            in_split = (rel in test) if split == "test" else (rel in val) if split == "validation" else (rel not in val and rel not in test)
-            if not in_split:
-                continue
-            if word in KEYWORDS:
-                items.append((wav, CLASSES.index(word)))
-            else:
-                unknown.append(wav)
-        n_kw = len(items)
-        rng.shuffle(unknown)
-        n_unknown = int(n_kw * unknown_ratio) if split == "train" else len(unknown) if split == "test" else int(n_kw * unknown_ratio)
-        items += [(p, CLASSES.index(UNKNOWN)) for p in unknown[:n_unknown]]
-        self.items = items
-        self.n_silence = int(n_kw * silence_ratio)
-        self.noise = [read_wav(p) for p in sorted((self.root / "_background_noise_").glob("*.wav"))]
-        self.rng = np.random.default_rng(seed)
+class KWSDataset(Dataset):
+    """Returns (features (1, frames, n_mels) float32 normalised, label)."""
+
+    def __init__(self, cache: KWSCache, split: str = "train", keywords: Sequence[str] = KEYWORDS10,
+                 exclude: Iterable[str] = (), unknown_ratio: float = 0.1, silence_ratio: float = 0.1,
+                 seed: int = 0, augment: bool = False):
+        self.cache = cache
+        self.classes = class_names(keywords)
+        self.augment = augment
+        self.rng = np.random.default_rng(seed + SPLITS[split])
+        kw = set(keywords)
+        ex = set(exclude)
+        if kw & ex:
+            raise ValueError(f"keywords and exclude overlap: {kw & ex}")
+        in_split = cache.split == SPLITS[split]
+        is_kw = np.isin(cache.words, list(kw))
+        is_unk = ~is_kw & ~np.isin(cache.words, list(ex))
+        kw_idx = np.flatnonzero(in_split & is_kw)
+        unk_idx = np.flatnonzero(in_split & is_unk)
+        n_kw = len(kw_idx)
+        rng = np.random.default_rng(seed)
+        unk_idx = rng.permutation(unk_idx)[: int(n_kw * unknown_ratio)]
+        # Silence rows are split 80/10/10 so that the splits never share a crop.
+        S = cache.silence.shape[0]
+        bounds = {0: (0, int(0.8 * S)), 1: (int(0.8 * S), int(0.9 * S)), 2: (int(0.9 * S), S)}
+        lo, hi = bounds[SPLITS[split]]
+        sil = rng.permutation(np.arange(lo, hi))[: int(n_kw * silence_ratio)]
+        word_to_label = {w: i for i, w in enumerate(keywords)}
+        self.items: List[Tuple[str, int, int]] = (
+            [("feats", int(i), word_to_label[cache.words[i]]) for i in kw_idx]
+            + [("feats", int(i), self.classes.index(UNKNOWN)) for i in unk_idx]
+            + [("silence", int(i), self.classes.index(SILENCE)) for i in sil]
+        )
 
     def __len__(self) -> int:
-        return len(self.items) + self.n_silence
+        return len(self.items)
 
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, int]:
-        if idx < len(self.items):
-            path, label = self.items[idx]
-            x = _fit_length(read_wav(path))
-        else:
-            label = CLASSES.index(SILENCE)
-            x = np.zeros(CLIP_SAMPLES, dtype=np.float32)
-            if self.noise:
-                src = self.noise[self.rng.integers(len(self.noise))]
-                start = self.rng.integers(0, max(len(src) - CLIP_SAMPLES, 1))
-                x = _fit_length(src[start:start + CLIP_SAMPLES]) * self.rng.uniform(0.0, 0.3)
-        return torch.from_numpy(np.ascontiguousarray(x)), label
+        src, i, label = self.items[idx]
+        arr = self.cache.feats[i] if src == "feats" else self.cache.silence[i]
+        x = self.cache.normalize(arr)
+        if self.augment:
+            x = spec_augment(x, self.rng)
+        return x.unsqueeze(0), label
+
+    def label_counts(self) -> dict:
+        counts = np.bincount([it[2] for it in self.items], minlength=len(self.classes))
+        return dict(zip(self.classes, counts.tolist()))
+
+
+class KWSOfficialTest(Dataset):
+    """Official 12-class test set. Words outside ``keywords`` are labelled ``_unknown_``."""
+
+    def __init__(self, cache: KWSCache, keywords: Sequence[str] = KEYWORDS10):
+        if cache.test_index is None:
+            raise FileNotFoundError("cache has no official test set; rerun cache.py with --test-root")
+        self.cache = cache
+        self.classes = class_names(keywords)
+        lookup = {w: i for i, w in enumerate(self.classes)}
+        unk = lookup[UNKNOWN]
+        self.labels = [lookup.get(w, unk) for w in cache.test_index["words"]]
+
+    def __len__(self) -> int:
+        return len(self.labels)
+
+    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, int]:
+        return self.cache.normalize(self.cache.test_feats[idx]).unsqueeze(0), self.labels[idx]

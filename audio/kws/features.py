@@ -53,4 +53,5 @@ class LogMel(nn.Module):
         return torch.log(mel + self.eps).transpose(1, 2)
 
     def num_frames(self, n_samples: int) -> int:
-        return 1 + (n_samples - self.win_length) // self.hop_length if n_samples >= self.win_length else 0
+        # torch.stft with center=False frames by n_fft, not win_length (the window is zero-padded).
+        return 1 + (n_samples - self.n_fft) // self.hop_length if n_samples >= self.n_fft else 0

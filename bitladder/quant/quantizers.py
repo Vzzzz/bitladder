@@ -110,8 +110,13 @@ class UniformWeightQuantizer(WeightQuantizer):
 
     def forward(self, w: torch.Tensor) -> torch.Tensor:
         s = self._scale(w)
-        q = torch.clamp(round_ste(w / s), -self.qmax, self.qmax)
-        return q * s
+        x = torch.clamp(w / s, -self.qmax, self.qmax)
+        if self.learnable:
+            # LSQ: gradient flows through the clamp (zero for clipped weights) and into s.
+            return round_ste(x) * s
+        # Fixed absmax scale: nothing is clipped except by fp rounding at the boundary,
+        # so use a pure identity STE and keep every weight's gradient.
+        return (x.round() * s).detach() + w - w.detach()
 
     @torch.no_grad()
     def integer_repr(self, w: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -129,9 +134,11 @@ class TernaryQuantizer(WeightQuantizer):
         return _absmean(w, self.per_channel).detach().clamp_min(_EPS)
 
     def forward(self, w: torch.Tensor) -> torch.Tensor:
+        # BitNet b1.58: w + (RoundClip(w / s) * s - w).detach(), i.e. identity STE for all
+        # weights including the clipped ones.
         s = self._scale(w)
-        q = torch.clamp(round_ste(w / s), -1, 1)
-        return q * s
+        q = torch.clamp(torch.round(w / s), -1, 1)
+        return (q * s).detach() + w - w.detach()
 
     @torch.no_grad()
     def integer_repr(self, w: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:

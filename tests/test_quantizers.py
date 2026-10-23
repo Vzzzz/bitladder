@@ -27,6 +27,7 @@ def test_uniform_8bit_is_close_to_identity():
 
 
 def test_uniform_codes_in_range_and_grad_flows():
+    torch.manual_seed(0)
     w = torch.randn(4, 10, requires_grad=True)
     q = UniformWeightQuantizer(4)
     codes, scale = q.integer_repr(w)
@@ -34,7 +35,10 @@ def test_uniform_codes_in_range_and_grad_flows():
     assert scale.shape == (4, 1)
     q(w).sum().backward()
     assert w.grad is not None and torch.isfinite(w.grad).all()
-    assert torch.allclose(w.grad, torch.ones_like(w.grad))  # identity STE
+    assert torch.allclose(w.grad, torch.ones_like(w.grad))  # identity STE, incl. channel absmax
+    w2 = torch.tensor([[1.0, -7.0, 3.5, 7.0]], requires_grad=True)  # exact boundary values
+    q(w2).sum().backward()
+    assert torch.allclose(w2.grad, torch.ones_like(w2.grad))
 
 
 def test_lsq_scale_is_learnable():
