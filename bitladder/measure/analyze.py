@@ -30,7 +30,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from ..quant.layers import QuantConv2d, QuantLinear, quant_layers
+from ..quant.layers import quant_layers
 from ..quant.quantizers import TernaryQuantizer, UniformWeightQuantizer
 
 Probe = Tuple[str, float]
@@ -210,20 +210,23 @@ def analysis_report(model: nn.Module, eval_fn: Optional[Callable[[nn.Module], fl
 
 
 def to_markdown(rep: Dict[str, object]) -> str:
-    lines = ["| layer | kind | params | out ch | bits | abs mean | near-zero | ternary zeros | ch-norm min/med | ch-norm CV |",
+    lines = ["| layer | kind | params | out ch | bits | abs mean | near-zero | ternary zeros "
+             "| ch-norm min/med | ch-norm CV |",
              "|---|---|---|---|---|---|---|---|---|---|"]
     for s in rep["weights"]:
         lines.append(f"| {s['name']} | {s['kind']} | {s['params']} | {s['out_channels']} | {s['wbits']:g} | "
                      f"{s['abs_mean']:.4f} | {100*s['near_zero_frac']:.1f} % | {100*s['ternary_zero_frac']:.1f} % | "
                      f"{s['chan_norm_min_over_median']:.2f} | {s['chan_norm_cv']:.2f} |")
     if "activations" in rep:
-        lines += ["", "| layer | input zeros | input abs mean | output abs mean | dead out channels |", "|---|---|---|---|---|"]
+        lines += ["", "| layer | input zeros | input abs mean | output abs mean | dead out channels |",
+                  "|---|---|---|---|---|"]
         for a in rep["activations"]:
             lines.append(f"| {a['name']} | {100*a['input_zero_frac']:.1f} % | {a['input_abs_mean']:.3f} | "
                          f"{a['output_abs_mean']:.3f} | {100*a['dead_out_channels_frac']:.1f} % |")
     if "sensitivity" in rep:
         s = rep["sensitivity"]
-        lines += ["", f"Baseline metric {s['baseline']:.4f}; cells are the drop when only that layer gets the probe.", "",
+        lines += ["", f"Baseline metric {s['baseline']:.4f}; "
+                  "cells are the drop when only that layer gets the probe.", "",
                   "| layer | " + " | ".join(s["probes"]) + " |", "|---|" + "---|" * len(s["probes"])]
         for name, row in zip(s["layers"], s["drop"]):
             lines.append(f"| {name} | " + " | ".join(f"{100*d:+.1f}" for d in row) + " |")

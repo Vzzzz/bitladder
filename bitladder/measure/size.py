@@ -21,7 +21,6 @@ import zlib
 from typing import Dict, List
 
 import numpy as np
-import torch
 import torch.nn as nn
 
 from ..quant.layers import QuantConv2d, QuantLinear
@@ -121,8 +120,8 @@ def model_size_report(model: nn.Module) -> Dict[str, object]:
             payload += np.zeros(2 * m.num_features, dtype=np.float16).tobytes()  # placeholder
         elif len(list(m.children())) == 0:
             other_params += sum(p.numel() for p in m.parameters(recurse=False))
-    quant_params = sum(int(l["params"]) for l in layers)
-    total_bytes = sum(int(l["total_bytes"]) for l in layers) + bn_bytes
+    quant_params = sum(int(rec["params"]) for rec in layers)
+    total_bytes = sum(int(rec["total_bytes"]) for rec in layers) + bn_bytes
     total_params = sum(p.numel() for p in model.parameters())
     return {
         "layers": layers,
@@ -134,5 +133,5 @@ def model_size_report(model: nn.Module) -> Dict[str, object]:
         "fp32_bytes": total_params * 4,
         "total_bytes": total_bytes,
         "zlib_bytes": len(zlib.compress(payload, 9)),
-        "mean_wbits": (sum(float(l["wbits"]) * int(l["params"]) for l in layers) / max(quant_params, 1)),
+        "mean_wbits": (sum(float(rec["wbits"]) * int(rec["params"]) for rec in layers) / max(quant_params, 1)),
     }

@@ -2,7 +2,7 @@
 one-shot sensitivity to lower bits / channel pruning / unstructured sparsity.
 
 python audio/kws/analyze.py --run results/kws12_fp32_s0.json
-python audio/kws/analyze.py --run results/kws12_fp32_s0.json --probes bits:8,4,3,2 ternary prune:0.25,0.5 sparsity:0.5,0.8
+python audio/kws/analyze.py --run results/kws12_fp32_s0.json --probes bits:8,4,2 ternary prune:0.25,0.5 sparsity:0.5,0.8
 python audio/kws/analyze.py --run results/base8_unk1_fp32_s0.json --split test --batches 20 --no-heatmap
 
 Writes results/<name>_analysis.json, results/<name>_analysis.md and results/<name>_sensitivity.png.
@@ -16,14 +16,13 @@ import sys
 from pathlib import Path
 from typing import List, Tuple
 
-import torch
 from torch.utils.data import DataLoader
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from audio.kws.checkpoint import load_run  # noqa: E402
-from audio.kws.data import KWSCache, KWSDataset, SILENCE, UNKNOWN  # noqa: E402
+from audio.kws.data import SILENCE, UNKNOWN, KWSCache, KWSDataset  # noqa: E402
 from bitladder.measure import analysis_report, save_heatmap, to_markdown  # noqa: E402
 from bitladder.train import evaluate, pick_device  # noqa: E402
 

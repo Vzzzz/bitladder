@@ -23,7 +23,8 @@ def test_tiny_models_shapes_and_macs():
 def test_bops_follow_bits():
     model = TinyCNN(width=8)
     fp = sum(count_bops(apply_quantization(model, QuantConfig("fp32")), (1, 28, 28)).values())
-    tern = sum(count_bops(apply_quantization(model, QuantConfig("ternary", abits=8, first_last_bits=None)), (1, 28, 28)).values())
+    cfg = QuantConfig("ternary", abits=8, first_last_bits=None)
+    tern = sum(count_bops(apply_quantization(model, cfg), (1, 28, 28)).values())
     assert tern < fp / 20
 
 

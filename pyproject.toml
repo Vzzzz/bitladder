@@ -7,7 +7,10 @@ name = "bitladder"
 version = "0.0.1"
 description = "Quantization ladder 32 -> 1 bit, pruning and friends on tiny applied models"
 readme = "README.md"
+license = {file = "LICENSE"}
+authors = [{name = "Valeriy Parubets"}]
 requires-python = ">=3.9"
+keywords = ["quantization", "pruning", "keyword-spotting", "tinyml", "pytorch"]
 dependencies = [
     "torch>=2.0",
     "torchvision>=0.15",
@@ -16,7 +19,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7", "matplotlib", "pandas"]
+dev = ["pytest>=7", "matplotlib", "pandas", "ruff>=0.4"]
 audio = ["soundfile>=0.12", "scipy>=1.10"]  # mp3 decoding + resampling for cv_negatives.py
 
 [tool.setuptools.packages.find]
@@ -24,3 +27,15 @@ include = ["bitladder*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+extend-exclude = ["colab"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E402"]  # scripts insert the repo root into sys.path before imports
+
+[tool.ruff.lint.isort]
+known-first-party = ["bitladder", "audio"]

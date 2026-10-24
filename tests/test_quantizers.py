@@ -4,18 +4,18 @@ import numpy as np
 import pytest
 import torch
 
+from bitladder.measure import model_size_report, pack_ternary, pack_uint, unpack_ternary, unpack_uint
+from bitladder.models import TinyCNN
 from bitladder.quant import (
     TERNARY_BITS,
     ActQuantizer,
     BinaryQuantizer,
+    QuantConfig,
     TernaryQuantizer,
     UniformWeightQuantizer,
-    QuantConfig,
     apply_quantization,
     quant_layers,
 )
-from bitladder.measure import model_size_report, pack_ternary, pack_uint, unpack_ternary, unpack_uint
-from bitladder.models import TinyCNN
 
 
 def test_uniform_8bit_is_close_to_identity():
@@ -96,7 +96,8 @@ def test_pack_ternary_roundtrip():
     assert np.array_equal(unpack_ternary(data, 101), codes)
 
 
-@pytest.mark.parametrize("scheme,expected_ratio", [("fp16", 1.9), ("uniform", 3.5), ("ternary", 10.0), ("binary", 14.0)])
+@pytest.mark.parametrize("scheme,expected_ratio",
+                         [("fp16", 1.9), ("uniform", 3.5), ("ternary", 10.0), ("binary", 14.0)])
 def test_size_report_shrinks(scheme, expected_ratio):
     model = TinyCNN(width=8)
     fp32 = model_size_report(apply_quantization(model, QuantConfig(scheme="fp32")))

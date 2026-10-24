@@ -1,0 +1,12 @@
+# Versions the reported numbers were obtained with (WSL, RTX 3080 Laptop, 2026-10-24).
+# Install torch/torchvision from the matching index first (cu130 here), then: pip install -r requirements-lock.txt
+torch==2.14.1
+torchvision==0.29.1
+numpy==2.2.6
+PyYAML==6.0.3
+scipy==1.15.3
+soundfile==0.14.0
+matplotlib==3.10.9
+pandas==2.3.3
+pytest==9.1.1
+ruff==0.17.2

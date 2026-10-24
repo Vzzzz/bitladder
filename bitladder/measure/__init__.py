@@ -1,5 +1,3 @@
-from .size import model_size_report, pack_ternary, pack_uint, unpack_ternary, unpack_uint
-from .flops import count_macs, count_bops
 from .analyze import (
     activation_stats,
     analysis_report,
@@ -9,6 +7,8 @@ from .analyze import (
     to_markdown,
     weight_stats,
 )
+from .flops import count_bops, count_macs
+from .size import model_size_report, pack_ternary, pack_uint, unpack_ternary, unpack_uint
 
 __all__ = [
     "activation_stats",

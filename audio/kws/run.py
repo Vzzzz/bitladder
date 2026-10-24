@@ -72,8 +72,10 @@ def run(args: argparse.Namespace) -> dict:
     test_ds = KWSDataset(cache, "test", **ds_kw)
     log(f"classes={train_ds.classes}")
     log(f"train={len(train_ds)} val={len(val_ds)} test={len(test_ds)} counts={train_ds.label_counts()}")
-    mk = lambda ds, shuffle: DataLoader(ds, batch_size=args.batch_size if shuffle else 512, shuffle=shuffle,
-                                        num_workers=args.workers, drop_last=shuffle, pin_memory=True)
+    def mk(ds, shuffle):
+        return DataLoader(ds, batch_size=args.batch_size if shuffle else 512, shuffle=shuffle,
+                          num_workers=args.workers, drop_last=shuffle, pin_memory=True)
+
     train_loader, val_loader, test_loader = mk(train_ds, True), mk(val_ds, False), mk(test_ds, False)
 
     model = DSCNN(channels=args.channels, blocks=args.blocks, num_classes=len(train_ds.classes))

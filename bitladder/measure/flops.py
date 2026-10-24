@@ -29,9 +29,11 @@ def count_macs(model: nn.Module, input_shape: Tuple[int, ...]) -> Dict[str, int]
     handles = []
     for name, m in model.named_modules():
         if isinstance(m, nn.Conv2d):
-            handles.append(m.register_forward_hook(lambda mod, inp, out, n=name: macs.__setitem__(n, _macs_conv(mod, out))))
+            handles.append(m.register_forward_hook(
+                lambda mod, inp, out, n=name: macs.__setitem__(n, _macs_conv(mod, out))))
         elif isinstance(m, nn.Linear):
-            handles.append(m.register_forward_hook(lambda mod, inp, out, n=name: macs.__setitem__(n, _macs_linear(mod, out))))
+            handles.append(m.register_forward_hook(
+                lambda mod, inp, out, n=name: macs.__setitem__(n, _macs_linear(mod, out))))
     was_training = model.training
     model.eval()
     device = next(model.parameters()).device

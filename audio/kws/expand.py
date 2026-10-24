@@ -45,7 +45,7 @@ from audio.kws.data import SILENCE, UNKNOWN, CVNegatives, KWSCache, KWSDataset  
 from audio.kws.model import DSCNN  # noqa: E402
 from bitladder.cli import add_quant_args, quant_config  # noqa: E402
 from bitladder.measure import count_macs, model_size_report  # noqa: E402
-from bitladder.quant import QuantConfig, QuantConv2d, QuantLinear, apply_quantization  # noqa: E402
+from bitladder.quant import QuantConv2d, QuantLinear, apply_quantization  # noqa: E402
 from bitladder.train import pick_device  # noqa: E402
 
 
@@ -250,7 +250,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--unknown-ratio", type=float, default=1.0,
                    help="background clips per new-word clip (paper: new commands plus background)")
     p.add_argument("--silence-ratio", type=float, default=0.1)
-    p.add_argument("--cv-unknown", type=int, default=0, help="Common Voice windows added to the branch background (train)")
+    p.add_argument("--cv-unknown", type=int, default=0,
+                   help="Common Voice windows added to the branch background (train)")
     p.add_argument("--epochs", type=int, default=10)
     p.add_argument("--lr", type=float, default=3e-3)
     p.add_argument("--batch-size", type=int, default=256)
@@ -361,7 +362,8 @@ def run(args: argparse.Namespace) -> dict:
                "val_macro_frr_ungated": val["none"]["macro_frr"]}
         history.append(rec)
         log(f"epoch={epoch} loss={rec['train_loss']:.4f} val_macro_frr@far{args.far}: "
-            f"hard={rec['val_macro_frr']:.4f} soft={rec['val_macro_frr_soft']:.4f} none={rec['val_macro_frr_ungated']:.4f}")
+            f"hard={rec['val_macro_frr']:.4f} soft={rec['val_macro_frr_soft']:.4f} "
+            f"none={rec['val_macro_frr_ungated']:.4f}")
     train_time = time.time() - t0
 
     sc, labels = scores_of(test_loader)
