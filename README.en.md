@@ -61,7 +61,7 @@ audio/kws/            keyword spotting: log-mel without torchaudio, feature cach
 colab/kws.ipynb       the same scripts in Google Colab for long sweeps
 sandbox_mnist/        MNIST warm-up
 docs/                 plan, decision log (ADR), literature review, hardware notes, results
-tests/                25 unit tests (quantizers, packing, sizes, data pipeline, analyzer)
+tests/                31 unit tests (quantizers, packing, sizes, data pipeline, analyzer, GRU, distillation)
 results/              run artifacts (not in git)
 ```
 

@@ -9,7 +9,7 @@ quantizers attached they behave exactly like ``nn.Conv2d`` / ``nn.Linear``.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterator, Optional
+from typing import Callable, Iterator, Optional
 
 import torch
 import torch.nn as nn
@@ -61,6 +61,19 @@ class QuantConv2d(nn.Conv2d, _QuantMixin):
         return self._conv_forward(x, self.quantized_weight(), self.bias)
 
 
+class QuantConv1d(nn.Conv1d, _QuantMixin):
+    """For TDNN / ECAPA-style speaker models and streaming enhancement front-ends."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._init_quant()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.aq is not None:
+            x = self.aq(x)
+        return self._conv_forward(x, self.quantized_weight(), self.bias)
+
+
 class QuantLinear(nn.Linear, _QuantMixin):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -72,9 +85,96 @@ class QuantLinear(nn.Linear, _QuantMixin):
         return F.linear(x, self.quantized_weight(), self.bias)
 
 
+class QuantGRU(nn.GRU):
+    """nn.GRU whose input-to-hidden and hidden-to-hidden weights are fake-quantized.
+
+    The recurrence itself runs through the stock fused kernel (``torch._VF.gru``, the same
+    call ``nn.GRU.forward`` makes), so training speed is unchanged. One weight quantizer
+    per weight tensor (``wq[k]`` matches ``self._flat_weights_names[k]``); biases stay
+    float. ``aq`` quantizes the *input* sequence only: the hidden state between steps is
+    not quantized, which matches int8 deployments that keep the state in higher precision.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.wq = nn.ModuleDict()
+        self.aq = None
+        self.storage_bits = 32.0
+
+    def set_quantizers(self, make_wq: Optional[Callable[[], Optional[WeightQuantizer]]],
+                       aq: Optional[ActQuantizer], storage_bits: Optional[float] = None) -> None:
+        self.wq = nn.ModuleDict()
+        self.aq = aq
+        bits = None
+        for name in self._flat_weights_names:
+            if not name.startswith("weight"):
+                continue
+            q = make_wq() if make_wq is not None else None
+            if q is not None:
+                q.init_from(getattr(self, name))
+                self.wq[name] = q
+                bits = q.bits
+        self.storage_bits = bits if bits is not None else (32.0 if storage_bits is None else storage_bits)
+
+    def quantized_weights(self) -> list:
+        out = []
+        for name in self._flat_weights_names:
+            w = getattr(self, name)
+            out.append(self.wq[name](w) if name in self.wq else w)
+        return out
+
+    @property
+    def wbits(self) -> float:
+        return self.storage_bits
+
+    @property
+    def abits(self) -> float:
+        return 32.0 if self.aq is None else self.aq.bits
+
+    def weight_tensors(self) -> Iterator[tuple[str, torch.Tensor]]:
+        for name in self._flat_weights_names:
+            if name.startswith("weight"):
+                yield name, getattr(self, name)
+
+    def forward(self, x, hx=None):  # type: ignore[override]
+        if self.aq is not None:
+            x = self.aq(x)
+        if not self.wq:
+            return super().forward(x, hx)
+        is_packed = isinstance(x, nn.utils.rnn.PackedSequence)
+        if is_packed:
+            raise NotImplementedError("QuantGRU does not support PackedSequence")
+        batch_first = self.batch_first
+        unbatched = x.dim() == 2
+        if unbatched:
+            x = x.unsqueeze(1)
+            batch_first = False
+        if hx is None:
+            n = x.size(0) if batch_first else x.size(1)
+            hx = x.new_zeros(self.num_layers * (2 if self.bidirectional else 1), n, self.hidden_size)
+        elif unbatched:
+            hx = hx.unsqueeze(1)
+        out, h = torch._VF.gru(x, hx, self.quantized_weights(), self.bias, self.num_layers,
+                               float(self.dropout), self.training, self.bidirectional, batch_first)
+        if unbatched:
+            out, h = out.squeeze(1), h.squeeze(1)
+        return out, h
+
+
+QUANT_LAYER_TYPES = (QuantConv2d, QuantConv1d, QuantLinear)
+
+
 def quant_layers(model: nn.Module) -> Iterator[tuple[str, _QuantMixin]]:
+    """Conv / linear quant layers (the ones with a single ``weight``)."""
     for name, m in model.named_modules():
-        if isinstance(m, (QuantConv2d, QuantLinear)):
+        if isinstance(m, QUANT_LAYER_TYPES):
+            yield name, m
+
+
+def quant_modules(model: nn.Module) -> Iterator[tuple[str, nn.Module]]:
+    """Everything apply_quantization touches: conv / linear layers and QuantGRU."""
+    for name, m in model.named_modules():
+        if isinstance(m, QUANT_LAYER_TYPES + (QuantGRU,)):
             yield name, m
 
 
@@ -110,24 +210,35 @@ class QuantConfig:
 
 
 def apply_quantization(model: nn.Module, cfg: QuantConfig) -> nn.Module:
-    """Attach quantizers in place according to ``cfg`` and return the model."""
-    layers = list(quant_layers(model))
+    """Attach quantizers in place according to ``cfg`` and return the model.
+
+    Layer order = ``named_modules`` order; the first and last quantizable modules are the
+    "edge" layers for ``first_last_bits``. QuantGRU gets one quantizer per weight tensor.
+    """
+    layers = list(quant_modules(model))
     if not layers:
-        raise ValueError("model has no QuantConv2d / QuantLinear layers")
+        raise ValueError("model has no QuantConv2d / QuantConv1d / QuantLinear / QuantGRU layers")
     n = len(layers)
     for idx, (_, layer) in enumerate(layers):
         is_edge = idx == 0 or idx == n - 1
+        is_gru = isinstance(layer, QuantGRU)
         if cfg.scheme in ("fp32", "fp16"):
             layer.set_quantizers(None, None, storage_bits=32.0 if cfg.scheme == "fp32" else 16.0)
             continue
         if is_edge and cfg.first_last_bits is not None:
             if cfg.first_last_bits >= 32:
-                wq = None
+                def make_wq():
+                    return None
             else:
-                wq = make_weight_quantizer("uniform", cfg.first_last_bits, cfg.per_channel, cfg.lsq)
+                def make_wq():
+                    return make_weight_quantizer("uniform", cfg.first_last_bits, cfg.per_channel, cfg.lsq)
         else:
-            wq = make_weight_quantizer(cfg.scheme, cfg.wbits, cfg.per_channel, cfg.lsq)
+            def make_wq():
+                return make_weight_quantizer(cfg.scheme, cfg.wbits, cfg.per_channel, cfg.lsq)
         # Never quantize the raw network input; it is normalised float data.
         aq = ActQuantizer(cfg.abits) if (cfg.abits is not None and idx > 0) else None
-        layer.set_quantizers(wq, aq)
+        if is_gru:
+            layer.set_quantizers(make_wq, aq)
+        else:
+            layer.set_quantizers(make_wq(), aq)
     return model

@@ -1,4 +1,13 @@
-from .layers import QuantConfig, QuantConv2d, QuantLinear, apply_quantization, quant_layers
+from .layers import (
+    QuantConfig,
+    QuantConv1d,
+    QuantConv2d,
+    QuantGRU,
+    QuantLinear,
+    apply_quantization,
+    quant_layers,
+    quant_modules,
+)
 from .quantizers import (
     TERNARY_BITS,
     ActQuantizer,
@@ -20,8 +29,11 @@ __all__ = [
     "make_weight_quantizer",
     "round_ste",
     "QuantConfig",
+    "QuantConv1d",
     "QuantConv2d",
+    "QuantGRU",
     "QuantLinear",
     "apply_quantization",
     "quant_layers",
+    "quant_modules",
 ]

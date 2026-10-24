@@ -116,7 +116,7 @@ class UniformWeightQuantizer(WeightQuantizer):
             return round_ste(x) * s
         # Fixed absmax scale: nothing is clipped except by fp rounding at the boundary,
         # so use a pure identity STE and keep every weight's gradient.
-        return (x.round() * s).detach() + w - w.detach()
+        return (x.round() * s).detach() + (w - w.detach())
 
     @torch.no_grad()
     def integer_repr(self, w: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -138,7 +138,7 @@ class TernaryQuantizer(WeightQuantizer):
         # weights including the clipped ones.
         s = self._scale(w)
         q = torch.clamp(torch.round(w / s), -1, 1)
-        return (q * s).detach() + w - w.detach()
+        return (q * s).detach() + (w - w.detach())
 
     @torch.no_grad()
     def integer_repr(self, w: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -158,7 +158,7 @@ class BinaryQuantizer(WeightQuantizer):
     def forward(self, w: torch.Tensor) -> torch.Tensor:
         s = self._scale(w)
         q = torch.where(w >= 0, torch.ones_like(w), -torch.ones_like(w))
-        return (q * s).detach() + w - w.detach()
+        return (q * s).detach() + (w - w.detach())
 
     @torch.no_grad()
     def integer_repr(self, w: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:

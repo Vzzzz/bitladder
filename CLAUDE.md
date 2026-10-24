@@ -35,7 +35,7 @@ skull-assistant не трогать. Длинные свипы можно гон
 4 890 wav), `kws_cache/` (log-mel float16 для всех клипов, строится `audio/kws/cache.py`
 за две минуты). Common Voice 27.0 ru распакован в `data/cv/`, кэши окон `kws_cache/cv_test.npy` (20k) и `cv_train.npy` (100k).
 
-**Что работает (2026-10-24).** 25 тестов зелёные. `audio/kws/run.py`: DS-CNN 64×4
+**Что работает (2026-10-24).** 31 тест зелёный. `audio/kws/run.py`: DS-CNN 64×4
 (23k параметров, 10.6 MMAC), 30 эпох по 4 с, 12 классов: 95.0 % на официальном тесте
 (Hello Edge DS-CNN S: 94.4 %). `audio/kws/expand.py`: модульное расширение по P-001
 (ветка на замороженной базе, режимы expand / separate / head, `--separable` для
@@ -51,11 +51,12 @@ FRR при FAR 1 %; `--neg cv` калибрует пороги на Common Voice
 прунингу каналов и разреженности, markdown и тепловая карта).
 
 **Код.** `bitladder/quant/` квантователи (uniform с опцией LSQ, тернарный BitNet с
-тождественным STE, бинарный XNOR, PACT), слои `QuantConv2d` / `QuantLinear`,
-`apply_quantization`; `bitladder/measure/` байты после упаковки, MACs, BOPs, анализатор слоёв;
+тождественным STE, бинарный XNOR, PACT), слои `QuantConv2d` / `QuantConv1d` / `QuantLinear`
+/ `QuantGRU` (веса на тензор, cuDNN-ядро), `apply_quantization`; `bitladder/distill.py`
+дистилляция эмбеддингов без меток; `bitladder/measure/` байты после упаковки, MACs, BOPs, анализатор слоёв;
 `bitladder/cli.py` общие аргументы квантования; `audio/kws/` features (log-mel без
 torchaudio), cache, data, model (DS-CNN), checkpoint, run, expand, analyze, cv_negatives; `colab/kws.ipynb`; `sandbox_mnist/` разогрев на
-MNIST (свип по MNIST не нужен); `tests/` 25 тестов, включая конвейер данных KWS на
+MNIST (свип по MNIST не нужен); `tests/` 31 тест, включая конвейер данных KWS на
 синтетическом мини-датасете и анализатор слоёв.
 
 ## Ключевые решения

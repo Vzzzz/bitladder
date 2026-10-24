@@ -18,12 +18,13 @@ from __future__ import annotations
 
 import math
 import zlib
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import numpy as np
+import torch
 import torch.nn as nn
 
-from ..quant.layers import QuantConv2d, QuantLinear
+from ..quant.layers import QUANT_LAYER_TYPES, QuantGRU
 from ..quant.quantizers import TERNARY_BITS
 
 
@@ -65,34 +66,57 @@ def unpack_ternary(data: bytes, count: int) -> np.ndarray:
     return digits[:count] - 1
 
 
-def _layer_payload(layer) -> Dict[str, object]:
-    """Return packed bytes for one QuantConv2d / QuantLinear."""
-    w = layer.weight.detach()
-    n = w.numel()
-    out_ch = w.shape[0]
-    bits = layer.wbits
-    if layer.wq is None:
+def _pack_weight(w: torch.Tensor, wq, bits: float) -> Tuple[bytes, bytes]:
+    """Packed weight bytes and fp16 scale bytes for one weight tensor."""
+    if wq is None:
         dtype = np.float32 if bits == 32 else np.float16
-        weight_bytes = w.cpu().numpy().astype(dtype).tobytes()
-        scale_bytes = b""
+        return w.cpu().numpy().astype(dtype).tobytes(), b""
+    q, scale = wq.integer_repr(w)
+    q = q.cpu().numpy()
+    if math.isclose(bits, TERNARY_BITS):
+        weight_bytes = pack_ternary(q)
+    elif bits == 1:
+        weight_bytes = pack_uint((q > 0).astype(np.uint64), 1)
     else:
-        q, scale = layer.wq.integer_repr(w)
-        q = q.cpu().numpy()
-        if math.isclose(bits, TERNARY_BITS):
-            weight_bytes = pack_ternary(q)
-        elif bits == 1:
-            weight_bytes = pack_uint((q > 0).astype(np.uint64), 1)
-        else:
-            k = int(round(bits))
-            qmax = 2 ** (k - 1) - 1
-            weight_bytes = pack_uint((q + qmax).astype(np.uint64), k)
-        scale_bytes = scale.detach().cpu().numpy().astype(np.float16).tobytes()
+        k = int(round(bits))
+        qmax = 2 ** (k - 1) - 1
+        weight_bytes = pack_uint((q + qmax).astype(np.uint64), k)
+    return weight_bytes, scale.detach().cpu().numpy().astype(np.float16).tobytes()
+
+
+def _layer_payload(layer) -> Dict[str, object]:
+    """Return packed bytes for one QuantConv2d / QuantConv1d / QuantLinear."""
+    w = layer.weight.detach()
+    weight_bytes, scale_bytes = _pack_weight(w, layer.wq, layer.wbits)
     bias_bytes = b"" if layer.bias is None else layer.bias.detach().cpu().numpy().astype(np.float16).tobytes()
     return {
-        "params": n,
-        "out_channels": out_ch,
-        "wbits": bits,
+        "params": w.numel(),
+        "out_channels": w.shape[0],
+        "wbits": layer.wbits,
         "abits": layer.abits,
+        "weight_bytes": len(weight_bytes),
+        "scale_bytes": len(scale_bytes),
+        "bias_bytes": len(bias_bytes),
+        "payload": weight_bytes + scale_bytes + bias_bytes,
+    }
+
+
+def _gru_payload(gru: QuantGRU) -> Dict[str, object]:
+    """All weight tensors of a QuantGRU packed; biases fp16."""
+    weight_bytes = scale_bytes = b""
+    params = 0
+    for name, w in gru.weight_tensors():
+        wb, sb = _pack_weight(w.detach(), gru.wq[name] if name in gru.wq else None, gru.wbits)
+        weight_bytes += wb
+        scale_bytes += sb
+        params += w.numel()
+    bias_bytes = b"".join(getattr(gru, n).detach().cpu().numpy().astype(np.float16).tobytes()
+                          for n in gru._flat_weights_names if n.startswith("bias"))
+    return {
+        "params": params,
+        "out_channels": gru.hidden_size,
+        "wbits": gru.wbits,
+        "abits": gru.abits,
         "weight_bytes": len(weight_bytes),
         "scale_bytes": len(scale_bytes),
         "bias_bytes": len(bias_bytes),
@@ -108,8 +132,8 @@ def model_size_report(model: nn.Module) -> Dict[str, object]:
     bn_params = 0
     other_params = 0
     for name, m in model.named_modules():
-        if isinstance(m, (QuantConv2d, QuantLinear)):
-            info = _layer_payload(m)
+        if isinstance(m, QUANT_LAYER_TYPES + (QuantGRU,)):
+            info = _gru_payload(m) if isinstance(m, QuantGRU) else _layer_payload(m)
             payload += info.pop("payload")
             info["name"] = name
             info["total_bytes"] = info["weight_bytes"] + info["scale_bytes"] + info["bias_bytes"]

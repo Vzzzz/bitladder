@@ -55,7 +55,7 @@ class LayerStats:
 
 
 def _kind(m: nn.Module) -> str:
-    if isinstance(m, nn.Conv2d):
+    if isinstance(m, nn.modules.conv._ConvNd):
         return "dwconv" if m.groups == m.in_channels and m.groups > 1 else "conv"
     return "linear"
 
