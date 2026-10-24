@@ -26,7 +26,7 @@ from audio.kws.model import DSCNN  # noqa: E402
 from bitladder.cli import add_quant_args, quant_config  # noqa: E402
 from bitladder.measure import count_bops, count_macs, model_size_report  # noqa: E402
 from bitladder.quant import apply_quantization  # noqa: E402
-from bitladder.train import evaluate, fit, pick_device  # noqa: E402
+from bitladder.train import cap_workers, evaluate, fit, pick_device  # noqa: E402
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -53,6 +53,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--out", default=str(ROOT / "results"))
     p.add_argument("--name", default=None, help="result file stem; defaults to a config label")
     p.add_argument("--quiet", action="store_true")
+    p.add_argument("--progress", dest="progress", action="store_true", default=None,
+                   help="epoch progress bar (default: only on a TTY)")
+    p.add_argument("--no-progress", dest="progress", action="store_false")
     return p
 
 
@@ -74,7 +77,7 @@ def run(args: argparse.Namespace) -> dict:
     log(f"train={len(train_ds)} val={len(val_ds)} test={len(test_ds)} counts={train_ds.label_counts()}")
     def mk(ds, shuffle):
         return DataLoader(ds, batch_size=args.batch_size if shuffle else 512, shuffle=shuffle,
-                          num_workers=args.workers, drop_last=shuffle, pin_memory=True)
+                          num_workers=cap_workers(args.workers), drop_last=shuffle, pin_memory=True)
 
     train_loader, val_loader, test_loader = mk(train_ds, True), mk(val_ds, False), mk(test_ds, False)
 
@@ -87,7 +90,7 @@ def run(args: argparse.Namespace) -> dict:
 
     t0 = time.time()
     history = fit(model, train_loader, val_loader, args.epochs, lr=args.lr, weight_decay=args.weight_decay,
-                  device=device, log=log)
+                  device=device, log=log, progress=args.progress, desc=args.name or cfg.label)
     train_time = time.time() - t0
 
     model.eval()

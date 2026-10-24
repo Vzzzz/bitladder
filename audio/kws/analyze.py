@@ -24,7 +24,7 @@ sys.path.insert(0, str(ROOT))
 from audio.kws.checkpoint import load_run  # noqa: E402
 from audio.kws.data import SILENCE, UNKNOWN, KWSCache, KWSDataset  # noqa: E402
 from bitladder.measure import analysis_report, save_heatmap, to_markdown  # noqa: E402
-from bitladder.train import evaluate, pick_device  # noqa: E402
+from bitladder.train import cap_workers, evaluate, pick_device  # noqa: E402
 
 
 def parse_probes(specs: List[str]) -> List[Tuple[str, float]]:
@@ -60,7 +60,7 @@ def main() -> None:
     cache = KWSCache(args.cache)
     keywords = [c for c in meta["classes"] if c not in (SILENCE, UNKNOWN)]
     ds = KWSDataset(cache, args.split, keywords=keywords, exclude=meta.get("exclude", []), seed=meta["seed"])
-    loader = DataLoader(ds, batch_size=args.batch_size, shuffle=False, num_workers=args.workers)
+    loader = DataLoader(ds, batch_size=args.batch_size, shuffle=False, num_workers=cap_workers(args.workers))
     print(f"{meta['name']}: {len(ds)} {args.split} samples, classes={ds.classes}")
 
     def eval_fn(m):

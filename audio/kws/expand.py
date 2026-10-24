@@ -46,7 +46,7 @@ from audio.kws.model import DSCNN  # noqa: E402
 from bitladder.cli import add_quant_args, quant_config  # noqa: E402
 from bitladder.measure import count_macs, model_size_report  # noqa: E402
 from bitladder.quant import QuantConv2d, QuantLinear, apply_quantization  # noqa: E402
-from bitladder.train import pick_device  # noqa: E402
+from bitladder.train import cap_workers, epoch_bar, pick_device  # noqa: E402
 
 
 # ----------------------------------------------------------------------------- models
@@ -265,6 +265,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--out", default=str(ROOT / "results"))
     p.add_argument("--name", default=None)
     p.add_argument("--quiet", action="store_true")
+    p.add_argument("--progress", dest="progress", action="store_true", default=None,
+                   help="epoch progress bar (default: only on a TTY)")
+    p.add_argument("--no-progress", dest="progress", action="store_false")
     return p
 
 
@@ -293,7 +296,7 @@ def run(args: argparse.Namespace) -> dict:
 
     def mk(ds, shuffle):
         return DataLoader(ds, batch_size=args.batch_size if shuffle else 512, shuffle=shuffle,
-                          num_workers=args.workers, drop_last=shuffle, pin_memory=True)
+                          num_workers=cap_workers(args.workers), drop_last=shuffle, pin_memory=True)
 
     train_loader, val_loader, test_loader = mk(train_ds, True), mk(val_ds, False), mk(test_ds, False)
 
@@ -334,9 +337,16 @@ def run(args: argparse.Namespace) -> dict:
     opt = torch.optim.Adam(branch.parameters(), lr=args.lr, weight_decay=1e-4)
     steps = args.epochs * len(train_loader)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=args.lr, total_steps=max(steps, 1), pct_start=0.15)
+    def scores_of(loader):
+        p, y, fired, bg = collect_scores(base, branch, loader, device, core_ids, core_thr, background_ids)
+        return (p, fired, bg), y
+
     history = []
     t0 = time.time()
-    for epoch in range(1, args.epochs + 1):
+    bar = epoch_bar(range(1, args.epochs + 1), f"{args.mode} k={args.k}", args.progress)
+    has_bar = hasattr(bar, "set_postfix")
+    neg = None
+    for epoch in bar:
         branch.train()
         running, n = 0.0, 0
         for x, y in train_loader:
@@ -350,10 +360,6 @@ def run(args: argparse.Namespace) -> dict:
             sched.step()
             running += loss.item() * len(y)
             n += len(y)
-        def scores_of(loader):
-            p, y, fired, bg = collect_scores(base, branch, loader, device, core_ids, core_thr, background_ids)
-            return (p, fired, bg), y
-
         neg = scores_of(cv_loader)[0] if cv_loader is not None else None
         sc, labels = scores_of(val_loader)
         val = {g: frr_at_far(sc, labels, n_new, args.far, g, neg) for g in ("hard", "soft", "none")}
@@ -361,9 +367,12 @@ def run(args: argparse.Namespace) -> dict:
                "val_macro_frr": val["hard"]["macro_frr"], "val_macro_frr_soft": val["soft"]["macro_frr"],
                "val_macro_frr_ungated": val["none"]["macro_frr"]}
         history.append(rec)
-        log(f"epoch={epoch} loss={rec['train_loss']:.4f} val_macro_frr@far{args.far}: "
-            f"hard={rec['val_macro_frr']:.4f} soft={rec['val_macro_frr_soft']:.4f} "
-            f"none={rec['val_macro_frr_ungated']:.4f}")
+        if has_bar:
+            bar.set_postfix(loss=f"{rec['train_loss']:.3f}", frr=f"{rec['val_macro_frr_ungated']:.4f}")
+        else:
+            log(f"epoch={epoch} loss={rec['train_loss']:.4f} val_macro_frr@far{args.far}: "
+                f"hard={rec['val_macro_frr']:.4f} soft={rec['val_macro_frr_soft']:.4f} "
+                f"none={rec['val_macro_frr_ungated']:.4f}")
     train_time = time.time() - t0
 
     sc, labels = scores_of(test_loader)
