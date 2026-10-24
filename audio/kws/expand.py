@@ -40,6 +40,7 @@ from torch.utils.data import DataLoader
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
+from audio.kws.checkpoint import load_run  # noqa: E402
 from audio.kws.data import SILENCE, UNKNOWN, CVNegatives, KWSCache, KWSDataset  # noqa: E402
 from audio.kws.model import DSCNN  # noqa: E402
 from bitladder.cli import add_quant_args, quant_config  # noqa: E402
@@ -50,16 +51,8 @@ from bitladder.train import pick_device  # noqa: E402
 
 # ----------------------------------------------------------------------------- models
 def load_base(json_path: str) -> Tuple[DSCNN, dict]:
-    """Rebuild a run.py model (with its quantizers) from the result JSON + checkpoint."""
-    meta = json.loads(Path(json_path).read_text())
-    model = DSCNN(channels=meta["channels"], blocks=meta["blocks"], num_classes=len(meta["classes"]))
-    apply_quantization(model, QuantConfig(**meta["config"]))
-    state = torch.load(Path(json_path).with_suffix(".pt"), map_location="cpu")
-    model.load_state_dict(state)
-    model.eval()
-    for p in model.parameters():
-        p.requires_grad_(False)
-    return model, meta
+    """Rebuild a run.py model (with its quantizers) from the result JSON + checkpoint, frozen."""
+    return load_run(json_path, freeze=True)
 
 
 def base_forward(base: DSCNN, x: torch.Tensor) -> Tuple[torch.Tensor, List[torch.Tensor]]:
