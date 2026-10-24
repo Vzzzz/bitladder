@@ -67,10 +67,20 @@ def base_forward(base: DSCNN, x: torch.Tensor) -> Tuple[torch.Tensor, List[torch
 
 
 class ExpandBlock(nn.Module):
-    def __init__(self, c_base: int, k: int, k_prev: int):
+    """reduce (1x1, c_base -> k) | concat previous | mix (3x3, or depthwise 3x3 + 1x1) | BN | hard-swish.
+
+    Dense mix: c_base*k + 9*k*(k+k_prev) params; depthwise-separable: c_base*k + 9*(k+k_prev) + (k+k_prev)*k.
+    """
+
+    def __init__(self, c_base: int, k: int, k_prev: int, separable: bool = False):
         super().__init__()
         self.reduce = QuantConv2d(c_base, k, 1, bias=False)
-        self.mix = QuantConv2d(k + k_prev, k, 3, padding=1, bias=False)
+        cin = k + k_prev
+        if separable:
+            self.mix = nn.Sequential(QuantConv2d(cin, cin, 3, padding=1, groups=cin, bias=False),
+                                     QuantConv2d(cin, k, 1, bias=False))
+        else:
+            self.mix = QuantConv2d(cin, k, 3, padding=1, bias=False)
         self.bn = nn.BatchNorm2d(k)
 
     def forward(self, tap: torch.Tensor, prev: Optional[torch.Tensor]) -> torch.Tensor:
@@ -81,12 +91,12 @@ class ExpandBlock(nn.Module):
 
 
 class ExpansionBranch(nn.Module):
-    """Taps every DS block of the frozen base. Params ~ blocks * (c_base*k + 9*k*2k) + head."""
+    """Taps every DS block of the frozen base; see ExpandBlock for the parameter count."""
 
-    def __init__(self, c_base: int, blocks: int, k: int, n_new: int):
+    def __init__(self, c_base: int, blocks: int, k: int, n_new: int, separable: bool = False):
         super().__init__()
         self.blocks = nn.ModuleList(
-            [ExpandBlock(c_base, k, 0 if i == 0 else k) for i in range(blocks)])
+            [ExpandBlock(c_base, k, 0 if i == 0 else k, separable) for i in range(blocks)])
         self.head = QuantLinear(k, n_new + 1)  # new words + background
 
     def forward(self, taps: List[torch.Tensor]) -> torch.Tensor:
@@ -233,6 +243,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--new", required=True, help="comma-separated new keywords")
     p.add_argument("--mode", default="expand", choices=["expand", "separate", "head"])
     p.add_argument("--k", type=int, default=8, help="branch width (channels per expand block)")
+    p.add_argument("--separable", action="store_true", help="depthwise-separable mix conv in the branch")
     p.add_argument("--sep-channels", type=int, default=40, help="channels of the separate baseline (40x2 ~ 6k params)")
     p.add_argument("--sep-blocks", type=int, default=2)
     p.add_argument("--cache", default=str(ROOT / "data" / "kws_cache"))
@@ -305,7 +316,7 @@ def run(args: argparse.Namespace) -> dict:
         + f"; FAR on GSC test negatives at these thresholds macro={np.nanmean(core_far_gsc):.4f}")
 
     if args.mode == "expand":
-        branch: nn.Module = ExpansionBranch(meta["channels"], meta["blocks"], args.k, n_new)
+        branch: nn.Module = ExpansionBranch(meta["channels"], meta["blocks"], args.k, n_new, args.separable)
     elif args.mode == "head":
         branch = HeadOnly(meta["channels"], n_new)
     else:
@@ -365,12 +376,13 @@ def run(args: argparse.Namespace) -> dict:
 
     size = model_size_report(branch)
     macs = count_macs(branch, (1, cache.frames, cache.n_mels)) if args.mode == "separate" else None
-    name = args.name or f"expand_{args.mode}_{'-'.join(new_words)}_k{args.k}_{cfg.label}_s{args.seed}"
+    name = args.name or (f"expand_{args.mode}_{'-'.join(new_words)}_k{args.k}{'ds' if args.separable else ''}"
+                         f"_{cfg.label}_s{args.seed}")
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
     torch.save(branch.state_dict(), out_dir / f"{name}.pt")
     result = {
-        "name": name, "mode": args.mode, "base": args.base, "base_label": meta["label"],
+        "name": name, "mode": args.mode, "separable": args.separable, "base": args.base, "base_label": meta["label"],
         "base_words": base_words, "new_words": new_words, "k": args.k, "config": vars(cfg),
         "branch_params": n_branch, "branch_bytes": size["total_bytes"], "branch_zlib_bytes": size["zlib_bytes"],
         "branch_macs": None if macs is None else sum(macs.values()),
