@@ -19,7 +19,7 @@ Jetson Orin Nano on the keyword.
 
 Inspired by [ViT-1.58b: Mobile Vision Transformers in the 1-bit Era](https://arxiv.org/abs/2406.18051).
 
-## Results so far (2026-10-24)
+## Results so far (2026-10-25)
 
 Keyword spotting on Google Speech Commands v2 with a DS-CNN 64×4 (23k parameters, 10.6 MMAC):
 
@@ -27,13 +27,14 @@ Keyword spotting on Google Speech Commands v2 with a DS-CNN 64×4 (23k parameter
 |---|---|
 | 12-class accuracy, official test set | **95.0 %** (Hello Edge, DS-CNN S: 94.4 %) |
 | base model after 4-bit QAT | 16 KB instead of 90 KB, same accuracy |
-| **a new keyword added to a frozen base** (branch ≤ 10k params, ternary weights) | **1.5 KB of flash**, FRR 6.8 ± 0.8 % at FAR 1 % (3 seeds) |
+| **a new keyword added to a frozen base** (branch ≤ 10k params, ternary weights) | **1.5 KB of flash** at 8.6 % FRR, or **4.2 KB** at 6.6 % (FAR 1 %, two word pairs, 3 seeds) |
 
 *Modular expansion* reproduces [Yandex, Interspeech 2026](https://arxiv.org/abs/2607.19918):
 the base network is frozen and only a small branch is trained per new keyword. The
 ordering of methods from the paper holds (branch < separate model < head-only). What the
-paper does not have: quantizing the base to 4 bits and the branch to ternary weights costs
-nothing in FRR within the 10k-parameter budget. The paper's core-first arbitration rule
+paper does not have: 4-bit QAT of the base is free; ternary branch weights cost 1–4 FRR
+points and hit depthwise convolutions first, which the layer analyzer confirms
+independently. The paper reports 4.37 % over five word pairs with an int8 branch of about 10 KB. The paper's core-first arbitration rule
 does not survive unseen, acoustically close keywords, and calibrating thresholds on hard
 negatives (Common Voice) does not fix it. Tables and the full protocol:
 [docs/results/kws_expansion_2026-10-23.md](docs/results/kws_expansion_2026-10-23.md) (in Russian).
