@@ -21,22 +21,17 @@ import torch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from bitladder.cli import add_quant_args, quant_config  # noqa: E402
 from bitladder.data import get_mnist_loaders  # noqa: E402
 from bitladder.measure import count_bops, count_macs, model_size_report  # noqa: E402
 from bitladder.models import build_mnist_model  # noqa: E402
-from bitladder.quant import QuantConfig, apply_quantization  # noqa: E402
+from bitladder.quant import apply_quantization  # noqa: E402
 from bitladder.train import evaluate, fit, pick_device  # noqa: E402
 
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--scheme", default="fp32", choices=["fp32", "fp16", "uniform", "ternary", "binary"])
-    p.add_argument("--wbits", type=int, default=8, help="bits for the uniform scheme")
-    p.add_argument("--abits", type=int, default=None, help="PACT activation bits; omit for float activations")
-    p.add_argument("--first-last-bits", type=int, default=8, help="uniform bits for first/last layer (32 = float)")
-    p.add_argument("--no-first-last", action="store_true", help="quantize first/last layer like the rest")
-    p.add_argument("--per-tensor", action="store_true", help="per-tensor scales instead of per-channel")
-    p.add_argument("--lsq", action="store_true", help="learned step size for the uniform scheme")
+    add_quant_args(p)
     p.add_argument("--model", default="cnn", choices=["cnn", "mlp"])
     p.add_argument("--width", type=int, default=8, help="channel width (cnn) or hidden size (mlp)")
     p.add_argument("--epochs", type=int, default=5)
@@ -49,20 +44,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--out", default=str(ROOT / "results"))
     p.add_argument("--name", default=None, help="result file stem; defaults to a config label")
     p.add_argument("--quiet", action="store_true")
+    p.add_argument("--progress", dest="progress", action="store_true", default=None,
+                   help="epoch progress bar (default: only on a TTY)")
+    p.add_argument("--no-progress", dest="progress", action="store_false")
     return p
 
 
 def run(args: argparse.Namespace) -> dict:
     torch.manual_seed(args.seed)
     device = pick_device(args.device)
-    cfg = QuantConfig(
-        scheme=args.scheme,
-        wbits=args.wbits,
-        abits=args.abits,
-        per_channel=not args.per_tensor,
-        lsq=args.lsq,
-        first_last_bits=None if args.no_first_last else args.first_last_bits,
-    )
+    cfg = quant_config(args)
     model = build_mnist_model(args.model, args.width)
     apply_quantization(model, cfg)
     log = (lambda s: None) if args.quiet else print
@@ -70,7 +61,8 @@ def run(args: argparse.Namespace) -> dict:
 
     train_loader, test_loader = get_mnist_loaders(args.data, args.batch_size, subset=args.subset, seed=args.seed)
     t0 = time.time()
-    history = fit(model, train_loader, test_loader, args.epochs, lr=args.lr, device=device, log=log)
+    history = fit(model, train_loader, test_loader, args.epochs, lr=args.lr, device=device, log=log,
+                  desc=f"{args.model}{args.width} {cfg.label}", progress=args.progress)
     train_time = time.time() - t0
 
     model.eval()
