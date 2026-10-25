@@ -17,7 +17,8 @@ from bitladder.quant import QuantConfig, apply_quantization  # noqa: E402
 def load_run(json_path: str, freeze: bool = False) -> Tuple[DSCNN, dict]:
     """Model with the quantizers it was trained with, in eval mode, plus the result dict."""
     meta = json.loads(Path(json_path).read_text())
-    model = DSCNN(channels=meta["channels"], blocks=meta["blocks"], num_classes=len(meta["classes"]))
+    model = DSCNN(channels=meta["channels"], blocks=meta["blocks"], num_classes=len(meta["classes"]),
+                  time_stride=meta.get("time_stride", 2))
     apply_quantization(model, QuantConfig(**meta["config"]))
     model.load_state_dict(torch.load(Path(json_path).with_suffix(".pt"), map_location="cpu"))
     model.eval()

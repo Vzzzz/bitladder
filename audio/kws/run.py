@@ -41,6 +41,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Common Voice speech windows added to _unknown_ in train (needs cv_train.npy)")
     p.add_argument("--channels", type=int, default=64)
     p.add_argument("--blocks", type=int, default=4)
+    p.add_argument("--time-stride", type=int, default=2, help="stem stride along time (1 keeps 49 frames, 4x MACs)")
     p.add_argument("--epochs", type=int, default=30)
     p.add_argument("--lr", type=float, default=3e-3)
     p.add_argument("--weight-decay", type=float, default=1e-4)
@@ -81,7 +82,8 @@ def run(args: argparse.Namespace) -> dict:
 
     train_loader, val_loader, test_loader = mk(train_ds, True), mk(val_ds, False), mk(test_ds, False)
 
-    model = DSCNN(channels=args.channels, blocks=args.blocks, num_classes=len(train_ds.classes))
+    model = DSCNN(channels=args.channels, blocks=args.blocks, num_classes=len(train_ds.classes),
+                  time_stride=args.time_stride)
     if args.init:
         model.load_state_dict(torch.load(args.init, map_location="cpu"), strict=False)
     apply_quantization(model, cfg)
@@ -110,7 +112,8 @@ def run(args: argparse.Namespace) -> dict:
     result = {
         "label": cfg.label, "config": vars(cfg), "name": name,
         "keywords": keywords, "exclude": exclude, "classes": train_ds.classes,
-        "channels": args.channels, "blocks": args.blocks, "epochs": args.epochs, "seed": args.seed,
+        "channels": args.channels, "blocks": args.blocks, "time_stride": args.time_stride,
+        "epochs": args.epochs, "seed": args.seed,
         "val_acc": val["acc"], "test_acc": test["acc"],
         "official_test_acc": None if official is None else official["acc"],
         "train_time_s": train_time, "total_params": size["total_params"],

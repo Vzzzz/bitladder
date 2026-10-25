@@ -31,9 +31,9 @@ class DSBlock(nn.Module):
 
 
 class DSCNN(nn.Module):
-    def __init__(self, channels: int = 64, blocks: int = 4, num_classes: int = 12):
+    def __init__(self, channels: int = 64, blocks: int = 4, num_classes: int = 12, time_stride: int = 2):
         super().__init__()
-        self.stem = QuantConv2d(1, channels, (10, 4), stride=(2, 2), padding=(5, 1), bias=False)
+        self.stem = QuantConv2d(1, channels, (10, 4), stride=(time_stride, 2), padding=(5, 1), bias=False)
         self.bn = nn.BatchNorm2d(channels)
         self.blocks = nn.Sequential(*[DSBlock(channels) for _ in range(blocks)])
         self.fc = QuantLinear(channels, num_classes)

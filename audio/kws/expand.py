@@ -93,15 +93,17 @@ class ExpandBlock(nn.Module):
 class ExpansionBranch(nn.Module):
     """Taps every DS block of the frozen base; see ExpandBlock for the parameter count."""
 
-    def __init__(self, c_base: int, blocks: int, k: int, n_new: int, separable: bool = False):
+    def __init__(self, c_base: int, blocks: int, k: int, n_new: int, separable: bool = False, taps: int = 0):
         super().__init__()
+        n_taps = blocks if taps <= 0 else min(taps, blocks)
+        self.skip = blocks - n_taps  # tap only the last n_taps DS blocks
         self.blocks = nn.ModuleList(
-            [ExpandBlock(c_base, k, 0 if i == 0 else k, separable) for i in range(blocks)])
+            [ExpandBlock(c_base, k, 0 if i == 0 else k, separable) for i in range(n_taps)])
         self.head = QuantLinear(k, n_new + 1)  # new words + background
 
     def forward(self, taps: List[torch.Tensor]) -> torch.Tensor:
         h = None
-        for blk, tap in zip(self.blocks, taps):
+        for blk, tap in zip(self.blocks, taps[self.skip:]):
             h = blk(tap, h)
         return self.head(F.adaptive_avg_pool2d(h, 1).flatten(1))
 
@@ -244,6 +246,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--mode", default="expand", choices=["expand", "separate", "head"])
     p.add_argument("--k", type=int, default=8, help="branch width (channels per expand block)")
     p.add_argument("--separable", action="store_true", help="depthwise-separable mix conv in the branch")
+    p.add_argument("--taps", type=int, default=0, help="tap only the last N DS blocks (0 = all)")
     p.add_argument("--sep-channels", type=int, default=40, help="channels of the separate baseline (40x2 ~ 6k params)")
     p.add_argument("--sep-blocks", type=int, default=2)
     p.add_argument("--cache", default=str(ROOT / "data" / "kws_cache"))
@@ -320,7 +323,7 @@ def run(args: argparse.Namespace) -> dict:
         + f"; FAR on GSC test negatives at these thresholds macro={np.nanmean(core_far_gsc):.4f}")
 
     if args.mode == "expand":
-        branch: nn.Module = ExpansionBranch(meta["channels"], meta["blocks"], args.k, n_new, args.separable)
+        branch: nn.Module = ExpansionBranch(meta["channels"], meta["blocks"], args.k, n_new, args.separable, args.taps)
     elif args.mode == "head":
         branch = HeadOnly(meta["channels"], n_new)
     else:
@@ -393,7 +396,8 @@ def run(args: argparse.Namespace) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
     torch.save(branch.state_dict(), out_dir / f"{name}.pt")
     result = {
-        "name": name, "mode": args.mode, "separable": args.separable, "base": args.base, "base_label": meta["label"],
+        "name": name, "mode": args.mode, "separable": args.separable, "taps": args.taps, "base": args.base,
+        "base_label": meta["label"],
         "base_words": base_words, "new_words": new_words, "k": args.k, "config": vars(cfg),
         "branch_params": n_branch, "branch_bytes": size["total_bytes"], "branch_zlib_bytes": size["zlib_bytes"],
         "branch_macs": None if macs is None else sum(macs.values()),
