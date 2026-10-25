@@ -36,8 +36,9 @@ paper does not have: 4-bit QAT of the base is free; ternary branch weights cost 
 points and hit depthwise convolutions first, which the layer analyzer confirms
 independently. The paper reports 4.37 % over five word pairs with an int8 branch of about 10 KB. The paper's core-first arbitration rule
 does not survive unseen, acoustically close keywords, and calibrating thresholds on hard
-negatives (Common Voice) does not fix it. Tables and the full protocol:
-[docs/results/kws_expansion_2026-10-23.md](docs/results/kws_expansion_2026-10-23.md) (in Russian).
+negatives (Common Voice) does not fix it. Tables, protocol and open questions in English:
+[docs/results/kws_expansion.en.md](docs/results/kws_expansion.en.md); full working notes in Russian:
+[docs/results/kws_expansion_2026-10-23.md](docs/results/kws_expansion_2026-10-23.md).
 
 One-shot layer sensitivity of the 12-class model (accuracy drop in points when only that
 layer is quantized / pruned, no retraining): 8 and 4 bits are free everywhere; depthwise
