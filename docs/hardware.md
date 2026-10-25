@@ -45,7 +45,11 @@ Wake-on-LAN, карта SD.
 
 ## Микроконтроллер (wake-word триггер)
 
-Кандидат (ADR-007): **STM32 Discovery B-U585I-IOT02A**. Cortex-M33 160 МГц, 2 МБ
+**Заказана (ADR-011, 2026-10-25): STM32F407G-DISC1.** Cortex-M4F 168 МГц, 1 МБ флеша,
+192 КБ ОЗУ, MEMS-микрофон MP45DT02 (PDM), ЦАП CS43L22, четыре светодиода, ST-LINK на борту.
+Инструменты: STM32CubeIDE, X-CUBE-AI, CMSIS-DSP (PDM2PCM, log-mel), CMSIS-NN (int8).
+
+Прежний кандидат (ADR-007, заменён): **STM32 Discovery B-U585I-IOT02A**. Cortex-M33 160 МГц, 2 МБ
 флеша, 786 КБ ОЗУ, два цифровых MEMS-микрофона, Wi-Fi/BLE, профиль серии U5
 ultra-low-power. Инструменты: STM32CubeIDE, X-CUBE-AI, CMSIS-DSP (log-mel), CMSIS-NN (int8).
 
