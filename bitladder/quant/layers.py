@@ -8,8 +8,9 @@ quantizers attached they behave exactly like ``nn.Conv2d`` / ``nn.Linear``.
 
 from __future__ import annotations
 
+import fnmatch
 from dataclasses import dataclass
-from typing import Callable, Iterator, Optional
+from typing import Callable, Dict, Iterator, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -198,15 +199,54 @@ class QuantConfig:
     per_channel: bool = True
     lsq: bool = False
     first_last_bits: Optional[int] = 8
+    overrides: Optional[Dict[str, Union[int, str]]] = None
+    """Per-layer precision by module name or fnmatch pattern (``blocks.*.pw``), checked in
+    order; the first match wins and takes precedence over the edge rule. Values: an int
+    (uniform k-bit, 32 = float, 16 = fp16 storage) or a scheme name (ternary, twn, ttq,
+    binary, fp32, fp16)."""
 
     @property
     def label(self) -> str:
+        mix = "-mix" if self.overrides else ""
         if self.scheme in ("fp32", "fp16"):
-            return self.scheme
+            return self.scheme + mix
         w = f"{self.scheme}{self.wbits}" if self.scheme == "uniform" else self.scheme
         a = f"-a{self.abits}" if self.abits else ""
         fl = "" if self.first_last_bits is None else f"-fl{self.first_last_bits}"
-        return f"{w}{a}{fl}{'-lsq' if self.lsq else ''}"
+        return f"{w}{a}{fl}{'-lsq' if self.lsq else ''}{mix}"
+
+
+def parse_overrides(spec: str) -> Dict[str, Union[int, str]]:
+    """``"blocks.*.pw=2,stem=8,fc=ternary"`` -> ordered dict of overrides."""
+    out: Dict[str, Union[int, str]] = {}
+    for item in spec.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        key, _, val = item.partition("=")
+        val = val.strip()
+        out[key.strip()] = int(val) if val.isdigit() else val
+    return out
+
+
+def _override_for(name: str, overrides: Optional[Dict[str, Union[int, str]]]) -> Optional[Union[int, str]]:
+    if not overrides:
+        return None
+    for pattern, val in overrides.items():
+        if name == pattern or fnmatch.fnmatchcase(name, pattern):
+            return val
+    return None
+
+
+def _factory(scheme: str, bits: int, cfg: "QuantConfig") -> Tuple[Callable[[], Optional[WeightQuantizer]], float]:
+    """Weight-quantizer factory and storage bits for a (scheme, bits) pair."""
+    if scheme in ("fp32", "fp16"):
+        return (lambda: None), (32.0 if scheme == "fp32" else 16.0)
+    if scheme == "uniform" and bits >= 32:
+        return (lambda: None), 32.0
+    if scheme == "uniform" and bits == 16:
+        return (lambda: None), 16.0
+    return (lambda: make_weight_quantizer(scheme, bits, cfg.per_channel, cfg.lsq)), -1.0
 
 
 def apply_quantization(model: nn.Module, cfg: QuantConfig) -> nn.Module:
@@ -219,26 +259,26 @@ def apply_quantization(model: nn.Module, cfg: QuantConfig) -> nn.Module:
     if not layers:
         raise ValueError("model has no QuantConv2d / QuantConv1d / QuantLinear / QuantGRU layers")
     n = len(layers)
-    for idx, (_, layer) in enumerate(layers):
+    for idx, (name, layer) in enumerate(layers):
         is_edge = idx == 0 or idx == n - 1
         is_gru = isinstance(layer, QuantGRU)
-        if cfg.scheme in ("fp32", "fp16"):
-            layer.set_quantizers(None, None, storage_bits=32.0 if cfg.scheme == "fp32" else 16.0)
-            continue
-        if is_edge and cfg.first_last_bits is not None:
-            if cfg.first_last_bits >= 32:
-                def make_wq():
-                    return None
-            else:
-                def make_wq():
-                    return make_weight_quantizer("uniform", cfg.first_last_bits, cfg.per_channel, cfg.lsq)
+        ov = _override_for(name, cfg.overrides)
+        if ov is not None:
+            scheme, bits = ("uniform", int(ov)) if isinstance(ov, int) else (str(ov), cfg.wbits)
+        elif cfg.scheme in ("fp32", "fp16"):
+            scheme, bits = cfg.scheme, 32
+        elif is_edge and cfg.first_last_bits is not None:
+            scheme, bits = "uniform", cfg.first_last_bits
         else:
-            def make_wq():
-                return make_weight_quantizer(cfg.scheme, cfg.wbits, cfg.per_channel, cfg.lsq)
+            scheme, bits = cfg.scheme, cfg.wbits
+        make_wq, storage = _factory(scheme, bits, cfg)
+        float_layer = scheme in ("fp32", "fp16") and ov is None and cfg.scheme in ("fp32", "fp16")
         # Never quantize the raw network input; it is normalised float data.
-        aq = ActQuantizer(cfg.abits) if (cfg.abits is not None and idx > 0) else None
+        aq = ActQuantizer(cfg.abits) if (cfg.abits is not None and idx > 0 and not float_layer) else None
         if is_gru:
-            layer.set_quantizers(make_wq, aq)
+            layer.set_quantizers(make_wq if storage < 0 else None, aq,
+                                 storage_bits=None if storage < 0 else storage)
         else:
-            layer.set_quantizers(make_wq(), aq)
+            wq = make_wq()
+            layer.set_quantizers(wq, aq, storage_bits=None if wq is not None else storage)
     return model

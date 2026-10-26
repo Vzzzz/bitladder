@@ -126,25 +126,93 @@ class UniformWeightQuantizer(WeightQuantizer):
 
 
 class TernaryQuantizer(WeightQuantizer):
-    """BitNet b1.58: weights in {-1, 0, 1} * mean(|w|)."""
+    """Weights in {-1, 0, 1} * scale. Three recipes, all stored at log2(3) bits:
+
+    absmean  BitNet b1.58: q = RoundClip(w / mean|w|), scale = mean|w|. Threshold is
+             implicitly 0.5 * mean|w|.
+    twn      Ternary Weight Networks (Li & Liu 2016): threshold 0.7 * mean|w|, scale =
+             mean of |w| over the weights that stay non-zero (per channel).
+    ttq      Trained Ternary Quantization (Zhu et al. 2017): threshold t * absmax (t = 0.05),
+             two learnable scales per channel (positive / negative), initialised like twn.
+    Identity STE on all weights (BitNet / TWN); ttq additionally trains its scales.
+    """
 
     bits = TERNARY_BITS
 
+    def __init__(self, per_channel: bool = True, mode: str = "absmean", twn_factor: float = 0.7,
+                 ttq_threshold: float = 0.05):
+        super().__init__(per_channel)
+        if mode not in ("absmean", "twn", "ttq"):
+            raise ValueError(f"unknown ternary mode {mode!r}")
+        self.mode = mode
+        self.twn_factor = twn_factor
+        self.ttq_threshold = ttq_threshold
+        self.scale_pos = None
+        self.scale_neg = None
+
+    def init_from(self, w: torch.Tensor) -> None:
+        if self.mode != "ttq":
+            return
+        with torch.no_grad():
+            q = self._codes(w)
+            pos = self._nonzero_mean(w, q > 0)
+            neg = self._nonzero_mean(w, q < 0)
+        self.scale_pos = nn.Parameter(pos.clone())
+        self.scale_neg = nn.Parameter(neg.clone())
+
+    def _threshold(self, w: torch.Tensor) -> torch.Tensor:
+        if self.mode == "absmean":
+            return 0.5 * _absmean(w, self.per_channel)
+        if self.mode == "twn":
+            return self.twn_factor * _absmean(w, self.per_channel)
+        return self.ttq_threshold * _absmax(w, self.per_channel)
+
+    def _codes(self, w: torch.Tensor) -> torch.Tensor:
+        t = self._threshold(w).detach()
+        return torch.where(w > t, torch.ones_like(w), torch.where(w < -t, -torch.ones_like(w), torch.zeros_like(w)))
+
+    def _nonzero_mean(self, w: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        aw = w.abs() * mask
+        if self.per_channel:
+            num = aw.flatten(1).sum(1)
+            den = mask.flatten(1).sum(1).clamp_min(1)
+            return _per_channel_view(num / den, w).clamp_min(_EPS)
+        return (aw.sum() / mask.sum().clamp_min(1)).clamp_min(_EPS)
+
     def _scale(self, w: torch.Tensor) -> torch.Tensor:
-        return _absmean(w, self.per_channel).detach().clamp_min(_EPS)
+        """Single positive scale (absmean / twn); ttq uses _scales()."""
+        if self.mode == "absmean":
+            return _absmean(w, self.per_channel).detach().clamp_min(_EPS)
+        q = self._codes(w)
+        return self._nonzero_mean(w, q != 0).detach()
+
+    def _scales(self, w: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        if self.mode == "ttq":
+            if self.scale_pos is None:
+                raise RuntimeError("call init_from(weight) before using a ttq quantizer")
+            return self.scale_pos.abs() + _EPS, self.scale_neg.abs() + _EPS
+        s = self._scale(w)
+        return s, s
 
     def forward(self, w: torch.Tensor) -> torch.Tensor:
-        # BitNet b1.58: w + (RoundClip(w / s) * s - w).detach(), i.e. identity STE for all
-        # weights including the clipped ones.
-        s = self._scale(w)
-        q = torch.clamp(torch.round(w / s), -1, 1)
-        return (q * s).detach() + (w - w.detach())
+        q = self._codes(w)
+        sp, sn = self._scales(w)
+        wq = torch.where(q > 0, sp.expand_as(w), torch.where(q < 0, -sn.expand_as(w), torch.zeros_like(w)))
+        if self.mode == "ttq":
+            # Identity STE on w; the learnable scales keep their graph (not detached).
+            return wq + (w - w.detach())
+        return wq.detach() + (w - w.detach())
 
     @torch.no_grad()
     def integer_repr(self, w: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        s = self._scale(w)
-        q = torch.clamp(torch.round(w / s), -1, 1).to(torch.int64)
-        return q, s
+        q = self._codes(w).to(torch.int64)
+        sp, sn = self._scales(w)
+        # Export: one scale per channel for absmean/twn; for ttq both scales (stacked).
+        scale = sp if self.mode != "ttq" else torch.cat([sp.flatten(), sn.flatten()])
+        return q, scale
+
+    def extra_repr(self) -> str:
+        return f"bits={self.bits:.2f}, per_channel={self.per_channel}, mode={self.mode}"
 
 
 class BinaryQuantizer(WeightQuantizer):
@@ -169,7 +237,7 @@ class BinaryQuantizer(WeightQuantizer):
 
 def make_weight_quantizer(scheme: str, bits: int = 8, per_channel: bool = True,
                           learnable: bool = False) -> WeightQuantizer | None:
-    """Factory. ``scheme`` in {fp32, fp16, uniform, ternary, binary}.
+    """Factory. ``scheme`` in {fp32, fp16, uniform, ternary, twn, ttq, binary}.
 
     fp32/fp16 return ``None`` (no fake quantization; fp16 only affects size accounting).
     """
@@ -179,7 +247,9 @@ def make_weight_quantizer(scheme: str, bits: int = 8, per_channel: bool = True,
     if scheme == "uniform":
         return UniformWeightQuantizer(bits, per_channel=per_channel, learnable=learnable)
     if scheme == "ternary":
-        return TernaryQuantizer(per_channel=per_channel)
+        return TernaryQuantizer(per_channel=per_channel, mode="absmean")
+    if scheme in ("twn", "ttq"):
+        return TernaryQuantizer(per_channel=per_channel, mode=scheme)
     if scheme == "binary":
         return BinaryQuantizer(per_channel=per_channel)
     raise ValueError(f"unknown scheme {scheme!r}")

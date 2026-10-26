@@ -1,3 +1,4 @@
+from .fold import fold_batchnorm
 from .layers import (
     QuantConfig,
     QuantConv1d,
@@ -5,6 +6,7 @@ from .layers import (
     QuantGRU,
     QuantLinear,
     apply_quantization,
+    parse_overrides,
     quant_layers,
     quant_modules,
 )
@@ -34,6 +36,8 @@ __all__ = [
     "QuantGRU",
     "QuantLinear",
     "apply_quantization",
+    "fold_batchnorm",
+    "parse_overrides",
     "quant_layers",
     "quant_modules",
 ]

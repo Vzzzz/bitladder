@@ -21,6 +21,7 @@ from torch.utils.data import DataLoader
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
+from audio.kws.checkpoint import load_run  # noqa: E402
 from audio.kws.data import KEYWORDS10, KWSCache, KWSDataset, KWSOfficialTest  # noqa: E402
 from audio.kws.model import DSCNN  # noqa: E402
 from bitladder.cli import add_quant_args, quant_config  # noqa: E402
@@ -49,6 +50,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--workers", type=int, default=4)
     p.add_argument("--no-augment", action="store_true")
     p.add_argument("--init", default=None, help="state_dict to start from (e.g. fp32 checkpoint before QAT)")
+    p.add_argument("--teacher", default=None, help="result JSON of a trained run used as a KD teacher (logits)")
+    p.add_argument("--kd-alpha", type=float, default=0.7)
+    p.add_argument("--kd-T", type=float, default=4.0)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--device", default="auto")
     p.add_argument("--out", default=str(ROOT / "results"))
@@ -91,8 +95,15 @@ def run(args: argparse.Namespace) -> dict:
     log(f"[{cfg.label}] DSCNN(c={args.channels}, blocks={args.blocks}) params={n_params} device={device}")
 
     t0 = time.time()
+    teacher = None
+    if args.teacher:
+        teacher, t_meta = load_run(args.teacher, freeze=True)
+        if t_meta["classes"] != train_ds.classes:
+            raise ValueError(f"teacher classes {t_meta['classes']} != student classes {train_ds.classes}")
+        log(f"KD teacher: {t_meta['name']} (alpha={args.kd_alpha}, T={args.kd_T})")
     history = fit(model, train_loader, val_loader, args.epochs, lr=args.lr, weight_decay=args.weight_decay,
-                  device=device, log=log, progress=args.progress, desc=args.name or cfg.label)
+                  device=device, log=log, progress=args.progress, desc=args.name or cfg.label,
+                  teacher=teacher, kd_alpha=args.kd_alpha, kd_T=args.kd_T)
     train_time = time.time() - t0
 
     model.eval()
@@ -113,6 +124,7 @@ def run(args: argparse.Namespace) -> dict:
         "label": cfg.label, "config": vars(cfg), "name": name,
         "keywords": keywords, "exclude": exclude, "classes": train_ds.classes,
         "channels": args.channels, "blocks": args.blocks, "time_stride": args.time_stride,
+        "teacher": args.teacher, "overrides": cfg.overrides,
         "epochs": args.epochs, "seed": args.seed,
         "val_acc": val["acc"], "test_acc": test["acc"],
         "official_test_acc": None if official is None else official["acc"],

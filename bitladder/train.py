@@ -50,17 +50,29 @@ def evaluate(model: nn.Module, loader: DataLoader, device: torch.device) -> Dict
     return {"acc": correct / max(total, 1), "loss": loss_sum / max(total, 1)}
 
 
+def kd_loss(student_logits: torch.Tensor, teacher_logits: torch.Tensor, y: torch.Tensor,
+            alpha: float, T: float) -> torch.Tensor:
+    """Hinton et al. 2015: alpha * T^2 * KL(teacher_T || student_T) + (1 - alpha) * CE."""
+    soft = F.kl_div(F.log_softmax(student_logits / T, dim=1), F.softmax(teacher_logits / T, dim=1),
+                    reduction="batchmean") * (T * T)
+    return alpha * soft + (1.0 - alpha) * F.cross_entropy(student_logits, y)
+
+
 def fit(model: nn.Module, train_loader: DataLoader, test_loader: DataLoader, epochs: int,
         lr: float = 2e-3, weight_decay: float = 0.0, device: Optional[torch.device] = None,
         log: Callable[[str], None] = print, eval_every: int = 1, progress: Optional[bool] = None,
-        desc: str = "train") -> List[Dict[str, float]]:
+        desc: str = "train", teacher: Optional[nn.Module] = None, kd_alpha: float = 0.7,
+        kd_T: float = 4.0) -> List[Dict[str, float]]:
     """Adam + one-cycle schedule. Returns per-epoch history with test accuracy.
 
     With a progress bar active the per-epoch numbers go to the bar's postfix instead of
-    ``log``; the full history is returned either way.
+    ``log``; the full history is returned either way. With ``teacher`` (a frozen model on
+    the same inputs) the loss is knowledge distillation on logits.
     """
     device = device or pick_device()
     model.to(device)
+    if teacher is not None:
+        teacher.to(device).eval()
     opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
     steps = epochs * len(train_loader)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=lr, total_steps=max(steps, 1), pct_start=0.15)
@@ -73,7 +85,12 @@ def fit(model: nn.Module, train_loader: DataLoader, test_loader: DataLoader, epo
         running, n = 0.0, 0
         for x, y in train_loader:
             x, y = x.to(device), y.to(device)
-            loss = F.cross_entropy(model(x), y)
+            if teacher is None:
+                loss = F.cross_entropy(model(x), y)
+            else:
+                with torch.no_grad():
+                    t_logits = teacher(x)
+                loss = kd_loss(model(x), t_logits, y, kd_alpha, kd_T)
             opt.zero_grad(set_to_none=True)
             loss.backward()
             opt.step()
