@@ -65,3 +65,6 @@
 - P-009 TinyLSTMs: Efficient Neural Speech Enhancement for Hearing Aids (Interspeech 2020). https://arxiv.org/abs/2005.11138
 - Accelerating RNN-based Speech Enhancement on a Multi-Core MCU with Mixed FP16-INT8 PTQ (TinyDenoiser, 2022). https://arxiv.org/abs/2210.07692
 - UL-UNAS (2025, продолжение GTCRN): см. README репозитория gtcrn.
+
+### Инженерия памяти на MCU (обзорное)
+- P-010 esp32-ai: LM 28.9M в 4 битах и коннектом мухи на ESP32-S3. https://github.com/slvDev/esp32-ai
