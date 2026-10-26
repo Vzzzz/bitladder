@@ -33,6 +33,8 @@
 ## Инструменты
 - Brevitas (перекрёстная проверка квантователей). https://github.com/Xilinx/brevitas
 - torchao. https://github.com/pytorch/ao
+- AIMET (Qualcomm AI Model Efficiency Toolkit): квантование и прунинг под Hexagon, перекрёстная проверка. https://github.com/quic/aimet
+- Qualcomm AI Engine Direct (QNN) как бэкенд ExecuTorch. https://pytorch.org/executorch/stable/backends-qualcomm.html
 - X-CUBE-AI. https://www.st.com/en/embedded-software/x-cube-ai.html
 - asfv1, ассемблер FV-1. https://github.com/ndf-zz/asfv1
 

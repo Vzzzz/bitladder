@@ -100,12 +100,15 @@ Q-054 (нужна ли сепарация, по замеру частоты пе
 | Устройство | Рантайм | Из коробки | Ниже 8 бит |
 |---|---|---|---|
 | RTX 3080 Laptop | PyTorch, ONNX Runtime, TensorRT | обучение, fp16, int8 | только fake-quant |
-| Galaxy S25 Ultra | ExecuTorch (XNNPACK, QNN), LiteRT | int8 на CPU и NPU | бинарные сети через Larq Compute Engine, остальное свои ядра |
+| Galaxy S25 Ultra | CPU: ExecuTorch (XNNPACK), LiteRT. NPU Hexagon: Qualcomm AI Engine Direct (QNN) как бэкенд ExecuTorch или делегат LiteRT, компиляция через Qualcomm AI Hub; квантование AIMET как перекрёстная проверка | int8 и int16 на NPU; int4 только weight-only для linear (W4A8 / W4A16, под LLM) | тернарных и бинарных форматов у Qualcomm нет: ниже int8 для свёрток только CPU, бинарные сети через Larq Compute Engine, остальное свои ядра |
 | Jetson Orin Nano 8 ГБ | TensorRT (GPU), ExecuTorch / LCE (CPU ARM64) | fp16, int8 | как на S25 по CPU |
 | STM32 (Cortex-M33) | X-CUBE-AI, CMSIS-NN | int8 | свои упакованные ядра, CMix-NN |
 
 ## Бэклог и спин-оффы
 
+- FV-1 под внешним управлением STM32 (питч-трекер на STM32, FV-1 исполняет эффекты;
+  три POT-входа, выбор программы, эмуляция EEPROM, второй аудиовход как канал данных):
+  выкладки в `fv1_control.md`.
 - Нейросеть на FV-1 (128 инструкций на отсчёт, 16-битные коэффициенты), нужен
   побитово точный эмулятор. Отдельная заметка.
 - Кастомное wake word «Костян» (см. трек 1, п. 7).
