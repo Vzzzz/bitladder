@@ -18,7 +18,8 @@ def add_quant_args(p: argparse.ArgumentParser) -> None:
     g.add_argument("--lsq", action="store_true", help="learned step size for the uniform scheme")
     g.add_argument("--overrides", default="", help="per-layer precision: 'blocks.*.pw=2,stem=8,fc=ternary'")
     g.add_argument("--mixed-from", default=None, help="analysis JSON (analyze.py) for a greedy mixed-precision profile")
-    g.add_argument("--mixed-budget", type=float, default=0.01, help="summed one-shot accuracy drop allowed (0.01 = 1 pt)")
+    g.add_argument("--mixed-budget", type=float, default=0.01,
+                   help="summed one-shot accuracy drop allowed (0.01 = 1 pt)")
 
 
 def quant_config(args: argparse.Namespace) -> QuantConfig:
