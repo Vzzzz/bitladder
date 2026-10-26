@@ -28,14 +28,18 @@ Windows-копия репозитория служит зеркалом для �
 В клоне WSL нельзя запускать `git clean` / `reset --hard` (в нём живут venv, данные,
 чекпоинты). Перед GPU-работой в WSL остановить стенд skull-assistant:
 `systemctl --user stop skull.target` (его ollama держит ~4 ГБ VRAM). Окружение
-skull-assistant не трогать. Длинные свипы можно гонять в Google Colab: `colab/kws.ipynb`.
+skull-assistant не трогать. Длинные свипы можно гонять в Google Colab: `colab/kws.ipynb`. Результаты прогонов (JSON, MD, PNG, CSV)
+уходят в приватный репозиторий `Vzzzz/bitladder-results` через `bitladder/results_sync.py`:
+в Colab токен в секрете `RESULTS_TOKEN` (ячейка S), локально `RESULTS_TOKEN=... python -m
+bitladder.results_sync --repo Vzzzz/bitladder-results --label local-rtx3080 results`. Чекпоинты `.pt`
+туда не идут. Раскладка: `<label>/<name>.json`, label = `colab-<дата>` или `local-<машина>`.
 
 **Данные** в `~/bitladder/data/` (gitignored): `speech_commands_v2/` (105 835 wav, 35 слов
 плюс `_background_noise_`), `speech_commands_test_v2/` (официальный тест на 12 классов,
 4 890 wav), `kws_cache/` (log-mel float16 для всех клипов, строится `audio/kws/cache.py`
 за две минуты). Common Voice 27.0 ru распакован в `data/cv/`, кэши окон `kws_cache/cv_test.npy` (20k) и `cv_train.npy` (100k).
 
-**Что работает (2026-10-25).** 31 тест зелёный. `audio/kws/run.py`: DS-CNN 64×4
+**Что работает (2026-10-25).** 39 тестов зелёные. `audio/kws/run.py`: DS-CNN 64×4
 (23k параметров, 10.6 MMAC), 30 эпох по 4 с, 12 классов: 95.0 % на официальном тесте
 (Hello Edge DS-CNN S: 94.4 %). `audio/kws/expand.py`: модульное расширение по P-001
 (ветка на замороженной базе, режимы expand / separate / head, `--separable` для
@@ -53,11 +57,15 @@ FRR при FAR 1 %; `--neg cv` калибрует пороги на Common Voice
 
 **Код.** `bitladder/quant/` квантователи (uniform с опцией LSQ, тернарный BitNet с
 тождественным STE, бинарный XNOR, PACT), слои `QuantConv2d` / `QuantConv1d` / `QuantLinear`
-/ `QuantGRU` (веса на тензор, cuDNN-ядро), `apply_quantization`; `bitladder/distill.py`
-дистилляция эмбеддингов без меток; `bitladder/measure/` байты после упаковки, MACs, BOPs, анализатор слоёв;
+/ `QuantGRU` (веса на тензор, cuDNN-ядро), `apply_quantization` с переопределениями
+битности по слоям (`QuantConfig.overrides`, маски fnmatch), тернарные режимы absmean / twn / ttq,
+`fold.py` сворачивание BatchNorm; `bitladder/measure/mixed.py` жадный профиль смешанной точности
+по отчёту анализатора (`--mixed-from`, `--mixed-budget`); `bitladder/train.py` дистилляция логитов
+(`--teacher` в run.py); `bitladder/distill.py` дистилляция эмбеддингов без меток;
+`bitladder/results_sync.py` отправка JSON/MD/PNG в репозиторий результатов после каждого прогона; `bitladder/measure/` байты после упаковки, MACs, BOPs, анализатор слоёв;
 `bitladder/cli.py` общие аргументы квантования; `audio/kws/` features (log-mel без
 torchaudio), cache, data, model (DS-CNN), checkpoint, run, expand, analyze, cv_negatives; `colab/kws.ipynb`; `sandbox_mnist/` разогрев на
-MNIST (свип по MNIST не нужен); `tests/` 31 тест, включая конвейер данных KWS на
+MNIST (свип по MNIST не нужен); `tests/` 39 тестов, включая конвейер данных KWS на
 синтетическом мини-датасете и анализатор слоёв.
 
 ## Ключевые решения

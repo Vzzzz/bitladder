@@ -34,6 +34,7 @@ def find_conv_bn_pairs(model: nn.Module, example: torch.Tensor) -> List[Tuple[st
     outputs: Dict[int, str] = {}
     pairs: List[Tuple[str, str]] = []
     handles = []
+
     def conv_hook(name):
         def fn(mod, inp, out):
             outputs[id(out)] = name
