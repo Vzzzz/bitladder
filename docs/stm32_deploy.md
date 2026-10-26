@@ -46,15 +46,15 @@ X-CUBE-AI вместе с калибровочной выборкой призн
 (per-channel для весов, per-tensor для активаций). Наш анализатор показал, что 8 бит
 без дообучения бесплатны, так что потерь не ожидается.
 
-1. ☐ `python audio/kws/export_onnx.py --run results/<run>.json --out export/<run>.onnx`:
-   свернуть BatchNorm (`bitladder.quant.fold_batchnorm`, ✅), снять квантователи, если
-   модель после QAT, то предварительно «запечь» квантованные веса (веса := их
-   fake-quant значения), экспортировать `torch.onnx.export` с opset 13, вход
-   `(1, 1, 49, 40)` float32, выход логиты `(1, 12)`.
-2. ☐ `python audio/kws/export_calib.py --cache data/kws_cache --n 500 --out export/calib.npz`:
-   500 нормализованных окон log-mel из валидации в формате, который принимает
-   X-CUBE-AI (npz с массивом `(N, 1, 49, 40)`), плюс ожидаемые выходы модели для
-   валидации на плате.
+1. ✅ `python audio/kws/export_onnx.py --run results/<run>.json --out export/<run>.onnx [--calib export/calib.npz]`:
+   запекает квантованные веса (веса := их fake-quant значения), сворачивает BatchNorm,
+   снимает квантователи, экспортирует ONNX (вход `features` `(1, 1, 49, 40)` float32,
+   выход `logits` `(1, 12)`, батч фиксирован 1) и сверяет с PyTorch через ONNX Runtime.
+   Проверено 2026-10-26 на `kws12_fp32_s0`: расхождение логитов 1.4e-5, точность на
+   калибровочной выборке совпадает.
+2. ✅ `python audio/kws/export_calib.py --run results/<run>.json --n 500 --out export/calib`:
+   нормализованные окна log-mel из валидации `(N, 1, 49, 40)` float32 в `.npz` и `.npy`,
+   метки, эталонные логиты модели для валидации на плате, mean/std нормализации.
 3. ☐ В CubeMX: X-CUBE-AI → Add network → ONNX → Quantize (int8, калибровка из npz) →
    Analyze (покажет флеш/ОЗУ/MACC) → Validate on desktop (сравнение с ONNX Runtime) →
    Generate code.
@@ -101,10 +101,11 @@ X-CUBE-AI вместе с калибровочной выборкой призн
 
 Проверка побитовой близости признаков (обязательно до замеров качества):
 
-- ☐ `python audio/kws/export_testvector.py`: взять один WAV из Speech Commands, положить
-  PCM int16 в C-массив (32 КБ флеша на 1 с), в прошивке прогнать его через пункты 3–5
-  вместо микрофона и вывести 49 × 40 признаков по UART; сравнить с
-  `LogMel()(wav)` в Python. Цель: максимальное расхождение до нормализации меньше
+- ✅ `python audio/kws/export_testvector.py --wav <clip>.wav --out export/testvector`: PCM int16
+  одного клипа как C-массив (32 КБ флеша), эталонные признаки до и после нормализации,
+  и отдельный заголовок `testvector_mel_fb.h` с разреженной матрицей мел-фильтров
+  (248 ненулевых весов на 40 полос), окном Ханна и параметрами фронтенда. ☐ В прошивке:
+  прогнать PCM через пункты 3–5 вместо микрофона, вывести 49 × 40 по UART и сравнить. Цель: максимальное расхождение до нормализации меньше
   0.05 (в логарифмических единицах), после int8-квантования не больше одного шага.
 - ☐ То же для выхода сети: X-CUBE-AI «Validate on target» на калибровочных данных.
 

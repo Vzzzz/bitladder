@@ -127,5 +127,5 @@ python sandbox_mnist/run.py --scheme ternary --abits 8 --epochs 2    # разо�
    квантования для MCU (arXiv 2508.15008), Larq / LCE, BitNet / ViT-1.58b.
 4. Данные для своего слова «Костян»: синтетика TTS, аугментации, реальные записи для теста.
 5. int8 на плате STM32F407G-DISC1 (ADR-011, едет) по `docs/stm32_deploy.md`;
-   до платы: `audio/kws/export_onnx.py`, `export_calib.py`, `export_testvector.py` (☐); проверить на Jetson пробуждение из
+   скрипты экспорта (`export_onnx.py`, `export_calib.py`, `export_testvector.py`) готовы и проверены; проверить на Jetson пробуждение из
    SC7 кнопкой (ADR-006).
