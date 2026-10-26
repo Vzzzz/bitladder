@@ -69,7 +69,7 @@ results/              run artifacts (not in git)
 
 Documentation is in Russian: [plan](docs/plan.md), [decision log](docs/decision-log.md),
 [literature review](docs/PUBLICATIONS.md), [results](docs/results/),
-[hardware](docs/hardware.md). `CLAUDE.md` is the context file for the coding agent the
+[hardware](docs/hardware.md), [STM32 deployment guide](docs/stm32_deploy.md). `CLAUDE.md` is the context file for the coding agent the
 project is developed with; it doubles as the up-to-date project status.
 
 ## Quick start

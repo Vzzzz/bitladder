@@ -73,6 +73,7 @@ results/              артефакты прогонов (в git не вход�
 - [docs/PUBLICATIONS.md](docs/PUBLICATIONS.md): литобзор, записи P-NNN с проверяемыми следствиями.
 - [docs/results/](docs/results/): сводные таблицы экспериментов.
 - [docs/hardware.md](docs/hardware.md): Jetson, микроконтроллер, аудио.
+- [docs/stm32_deploy.md](docs/stm32_deploy.md): пошаговое развёртывание wake word на STM32F407G-DISC1.
 - [docs/references.md](docs/references.md): стартовый список статей и инструментов.
 - [CLAUDE.md](CLAUDE.md): контекст для агента, с которым ведётся разработка; заодно
   актуальный статус проекта и ближайшие шаги.
