@@ -52,6 +52,10 @@ class ResultsSync:
         _run(["git", "config", "user.email", email], self.dir)
         _run(["git", "remote", "set-url", "origin", self._url], self.dir)
 
+    def _remote_has_main(self) -> bool:
+        out = _run(["git", "ls-remote", "--heads", "origin", "main"], self.dir).stdout
+        return bool(out.strip())
+
     def push(self, results_dir: str = "results", suffixes: Iterable[str] = ARTIFACT_SUFFIXES,
              message: Optional[str] = None, retries: int = 3) -> int:
         """Copy artifacts from ``results_dir`` into ``<label>/`` and push. Returns files copied."""
@@ -75,7 +79,8 @@ class ResultsSync:
         _run(["git", "commit", "-q", "-m", msg], self.dir)
         for attempt in range(retries):
             try:
-                _run(["git", "pull", "-q", "--rebase", "origin", "main"], self.dir)
+                if self._remote_has_main():   # a freshly created empty repo has no branch to pull yet
+                    _run(["git", "pull", "-q", "--rebase", "origin", "main"], self.dir)
                 _run(["git", "push", "-q", "origin", "HEAD:main"], self.dir)
                 return n
             except subprocess.CalledProcessError as e:  # noqa: PERF203

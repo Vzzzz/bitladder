@@ -57,3 +57,24 @@ def test_push_copies_artifacts_and_skips_checkpoints(tmp_path, remote):
 def test_missing_token_raises(tmp_path):
     with pytest.raises(ValueError):
         ResultsSync("owner/results", None, "x", work_dir=str(tmp_path))
+
+
+def test_push_into_empty_remote(tmp_path, monkeypatch):
+    """A freshly created GitHub repo has no branch yet: the first push must create main."""
+    bare = tmp_path / "empty.git"
+    _git(["init", "-q", "--bare", "-b", "main", str(bare)], tmp_path)
+    orig_run = results_sync._run
+
+    def patched_run(args, cwd, quiet=True):
+        args = [str(bare) if isinstance(a, str) and a.startswith("https://x-access-token:") else a for a in args]
+        return orig_run(args, cwd, quiet)
+
+    monkeypatch.setattr(results_sync, "_run", patched_run)
+    results = tmp_path / "results"
+    results.mkdir()
+    (results / "a.json").write_text("{}")
+    sync = ResultsSync("owner/results", "secret-token", "first", work_dir=str(tmp_path / "work"))
+    assert sync.push(str(results)) == 1
+    tree = subprocess.run(["git", "ls-tree", "-r", "--name-only", "main"], cwd=str(bare),
+                          capture_output=True, text=True).stdout.split()
+    assert tree == ["first/a.json"]
