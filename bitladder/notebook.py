@@ -12,6 +12,7 @@ import os
 import shlex
 import subprocess
 import sys
+from pathlib import Path
 from typing import Iterable, Optional
 
 SHOW_PREFIXES = ("RESULT", "epoch", "[", "KD teacher", "classes=", "train=", "base=", "core thresholds", "wrote")
@@ -43,3 +44,21 @@ def run(cmd: str, show: Iterable[str] = SHOW_PREFIXES, tail: int = 30, cwd: Opti
         if check:
             raise RuntimeError(f"command failed with exit code {rc}: {cmd[:160]}")
     return "".join(out_lines)
+
+
+def done(name: str, out: str = "results", ckpt: bool = False) -> bool:
+    """True when ``results/<name>.json`` (or ``results/<name>`` if ``name`` has a suffix) already exists,
+    and, with ``ckpt``, the ``.pt`` checkpoint next to it (a base that later runs will load)."""
+    base = Path(out) / name
+    target = base if base.suffix else base.with_suffix(".json")
+    if not target.exists():
+        return False
+    return (not ckpt) or base.with_suffix(".pt").exists()
+
+
+def run_once(cmd: str, name: str, ckpt: bool = False, out: str = "results", **kw) -> Optional[str]:
+    """``run`` unless the run named ``name`` is already in ``out`` (resume a session after a disconnect)."""
+    if done(name, out, ckpt):
+        print(f"skip {name}: already in {out}/", flush=True)
+        return None
+    return run(cmd, **kw)

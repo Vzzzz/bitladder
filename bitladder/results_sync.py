@@ -71,6 +71,27 @@ class ResultsSync:
         out = self._git(["ls-remote", "--heads", "origin", "main"]).stdout
         return bool(out.strip())
 
+    def restore(self, results_dir: str = "results", label: Optional[str] = None,
+                suffixes: Iterable[str] = ARTIFACT_SUFFIXES) -> int:
+        """Copy artifacts of ``label`` (default: this session's label) from the repo into ``results_dir``
+        when they are missing locally, so that a new runtime can skip runs that already finished.
+        Checkpoints are not in the repo: a run that needs its ``.pt`` has to be trained again."""
+        src = self.dir / (label or self.label)
+        if not src.is_dir():
+            return 0
+        dst = Path(results_dir)
+        n = 0
+        for f in sorted(src.rglob("*")):
+            if not f.is_file() or f.suffix not in suffixes:
+                continue
+            target = dst / f.relative_to(src)
+            if target.exists():
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(f, target)
+            n += 1
+        return n
+
     def push(self, results_dir: str = "results", suffixes: Iterable[str] = ARTIFACT_SUFFIXES,
              message: Optional[str] = None, retries: int = 3) -> int:
         """Copy artifacts from ``results_dir`` into ``<label>/`` and push. Returns files copied."""

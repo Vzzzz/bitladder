@@ -89,3 +89,17 @@ def test_git_errors_never_contain_the_token(tmp_path):
         ResultsSync("owner/results", "SECRET123", "x", work_dir=str(tmp_path / "w2")) if False else \
             results_sync._run(["git", "rev-parse", "--verify", "nope-SECRET123"], tmp_path, mask="SECRET123")
     assert "SECRET123" not in str(ei.value)
+
+
+def test_restore_brings_back_missing_artifacts(tmp_path, remote):
+    results = tmp_path / "results"
+    results.mkdir()
+    (results / "a.json").write_text("{}")
+    sync = ResultsSync("owner/results", "secret-token", "sess1", work_dir=str(tmp_path / "work"))
+    assert sync.push(str(results)) == 1
+    (results / "a.json").unlink()
+    (results / "b.json").write_text("{}")
+    assert sync.restore(str(results)) == 1
+    assert (results / "a.json").read_text() == "{}" and (results / "b.json").exists()
+    assert sync.restore(str(results)) == 0
+    assert sync.restore(str(results), label="nope") == 0
