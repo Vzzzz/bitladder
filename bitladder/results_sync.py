@@ -30,8 +30,19 @@ from typing import Iterable, Optional
 ARTIFACT_SUFFIXES = (".json", ".csv", ".md", ".png", ".txt")
 
 
-def _run(args: list, cwd: Path, quiet: bool = True) -> subprocess.CompletedProcess:
-    return subprocess.run(args, cwd=str(cwd), check=True, capture_output=quiet, text=True)
+class SyncError(RuntimeError):
+    """A git step failed; the message never contains the token."""
+
+
+def _run(args: list, cwd: Path, quiet: bool = True, mask: Optional[str] = None) -> subprocess.CompletedProcess:
+    """Run git; on failure raise SyncError with the command and stderr, the token replaced by ``<token>``."""
+    try:
+        return subprocess.run(args, cwd=str(cwd), check=True, capture_output=quiet, text=True)
+    except subprocess.CalledProcessError as e:
+        hide = (lambda t: t.replace(mask, "<token>")) if mask else (lambda t: t)
+        cmd = " ".join(hide(str(a)) for a in args)
+        err = hide(e.stderr or "").strip()[-600:]
+        raise SyncError(f"`{cmd}` failed (exit {e.returncode}): {err}") from None
 
 
 class ResultsSync:
@@ -45,15 +56,19 @@ class ResultsSync:
                                                  else Path.home() / ".cache" / "bitladder")
         base.mkdir(parents=True, exist_ok=True)
         self.dir = base / repo.split("/")[-1]
+        self._token = token
         self._url = f"https://x-access-token:{token}@github.com/{repo}.git"
         if not (self.dir / ".git").is_dir():
-            _run(["git", "clone", "-q", self._url, str(self.dir)], base)
-        _run(["git", "config", "user.name", user], self.dir)
-        _run(["git", "config", "user.email", email], self.dir)
-        _run(["git", "remote", "set-url", "origin", self._url], self.dir)
+            self._git(["clone", "-q", self._url, str(self.dir)], base)
+        self._git(["config", "user.name", user])
+        self._git(["config", "user.email", email])
+        self._git(["remote", "set-url", "origin", self._url])
+
+    def _git(self, args: list, cwd: Optional[Path] = None) -> subprocess.CompletedProcess:
+        return _run(["git", *args], cwd or self.dir, mask=self._token)
 
     def _remote_has_main(self) -> bool:
-        out = _run(["git", "ls-remote", "--heads", "origin", "main"], self.dir).stdout
+        out = self._git(["ls-remote", "--heads", "origin", "main"]).stdout
         return bool(out.strip())
 
     def push(self, results_dir: str = "results", suffixes: Iterable[str] = ARTIFACT_SUFFIXES,
@@ -74,18 +89,18 @@ class ResultsSync:
             n += 1
         if n == 0:
             return 0
-        _run(["git", "add", "-A", self.label], self.dir)
+        self._git(["add", "-A", self.label])
         msg = message or f"{self.label}: {n} file(s) {time.strftime('%Y-%m-%d %H:%M:%S')}"
-        _run(["git", "commit", "-q", "-m", msg], self.dir)
+        self._git(["commit", "-q", "-m", msg])
         for attempt in range(retries):
             try:
                 if self._remote_has_main():   # a freshly created empty repo has no branch to pull yet
-                    _run(["git", "pull", "-q", "--rebase", "origin", "main"], self.dir)
-                _run(["git", "push", "-q", "origin", "HEAD:main"], self.dir)
+                    self._git(["pull", "-q", "--rebase", "origin", "main"])
+                self._git(["push", "-q", "origin", "HEAD:main"])
                 return n
-            except subprocess.CalledProcessError as e:  # noqa: PERF203
+            except SyncError as e:  # noqa: PERF203
                 if attempt == retries - 1:
-                    sys.stderr.write(f"results_sync: push failed: {e.stderr[-400:] if e.stderr else e}\n")
+                    sys.stderr.write(f"results_sync: push failed: {e}\n")
                     raise
                 time.sleep(2 * (attempt + 1))
         return n

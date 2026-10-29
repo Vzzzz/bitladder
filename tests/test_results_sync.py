@@ -27,9 +27,9 @@ def remote(tmp_path, monkeypatch):
     # Route the https URL to the local bare repo: patch the URL before cloning.
     orig_run = results_sync._run
 
-    def patched_run(args, cwd, quiet=True):
+    def patched_run(args, cwd, quiet=True, mask=None):
         args = [str(bare) if isinstance(a, str) and a.startswith("https://x-access-token:") else a for a in args]
-        return orig_run(args, cwd, quiet)
+        return orig_run(args, cwd, quiet, mask)
 
     monkeypatch.setattr(results_sync, "_run", patched_run)
     return bare
@@ -65,9 +65,9 @@ def test_push_into_empty_remote(tmp_path, monkeypatch):
     _git(["init", "-q", "--bare", "-b", "main", str(bare)], tmp_path)
     orig_run = results_sync._run
 
-    def patched_run(args, cwd, quiet=True):
+    def patched_run(args, cwd, quiet=True, mask=None):
         args = [str(bare) if isinstance(a, str) and a.startswith("https://x-access-token:") else a for a in args]
-        return orig_run(args, cwd, quiet)
+        return orig_run(args, cwd, quiet, mask)
 
     monkeypatch.setattr(results_sync, "_run", patched_run)
     results = tmp_path / "results"
@@ -78,3 +78,14 @@ def test_push_into_empty_remote(tmp_path, monkeypatch):
     tree = subprocess.run(["git", "ls-tree", "-r", "--name-only", "main"], cwd=str(bare),
                           capture_output=True, text=True).stdout.split()
     assert tree == ["first/a.json"]
+
+
+def test_git_errors_never_contain_the_token(tmp_path):
+    with pytest.raises(results_sync.SyncError) as ei:
+        results_sync._run(["git", "clone", "-q", str(tmp_path / "missing-SECRET123.git"), str(tmp_path / "dst")],
+                          tmp_path, mask="SECRET123")
+    assert "SECRET123" not in str(ei.value) and "<token>" in str(ei.value)
+    with pytest.raises(results_sync.SyncError) as ei:
+        ResultsSync("owner/results", "SECRET123", "x", work_dir=str(tmp_path / "w2")) if False else \
+            results_sync._run(["git", "rev-parse", "--verify", "nope-SECRET123"], tmp_path, mask="SECRET123")
+    assert "SECRET123" not in str(ei.value)
