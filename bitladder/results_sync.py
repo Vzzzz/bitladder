@@ -1,5 +1,6 @@
-"""Push experiment artifacts (JSON / CSV / Markdown / PNG, never checkpoints) to a separate
-git repository so that a dying Colab session loses at most one run.
+"""Push experiment artifacts (JSON / CSV / Markdown / PNG, plus checkpoints up to a size cap) to a
+separate git repository so that a dying Colab / Kaggle session loses at most one run and the next
+session resumes without retraining the bases.
 
 Usage from a notebook or script::
 
@@ -28,6 +29,14 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 ARTIFACT_SUFFIXES = (".json", ".csv", ".md", ".png", ".txt")
+CKPT_SUFFIX = ".pt"
+CKPT_MAX_BYTES = 2_000_000   # our KWS checkpoints are 0.1-0.5 MB; anything bigger stays local
+
+
+def _wanted(f: Path, suffixes: Iterable[str], ckpt_max_bytes: int) -> bool:
+    if f.suffix in tuple(suffixes):
+        return True
+    return f.suffix == CKPT_SUFFIX and f.stat().st_size <= ckpt_max_bytes
 
 
 class SyncError(RuntimeError):
@@ -72,17 +81,16 @@ class ResultsSync:
         return bool(out.strip())
 
     def restore(self, results_dir: str = "results", label: Optional[str] = None,
-                suffixes: Iterable[str] = ARTIFACT_SUFFIXES) -> int:
-        """Copy artifacts of ``label`` (default: this session's label) from the repo into ``results_dir``
-        when they are missing locally, so that a new runtime can skip runs that already finished.
-        Checkpoints are not in the repo: a run that needs its ``.pt`` has to be trained again."""
+                suffixes: Iterable[str] = ARTIFACT_SUFFIXES + (CKPT_SUFFIX,)) -> int:
+        """Copy artifacts and checkpoints of ``label`` (default: this session's label) from the repo into
+        ``results_dir`` when they are missing locally, so that a new runtime resumes where the last one died."""
         src = self.dir / (label or self.label)
         if not src.is_dir():
             return 0
         dst = Path(results_dir)
         n = 0
         for f in sorted(src.rglob("*")):
-            if not f.is_file() or f.suffix not in suffixes:
+            if not f.is_file() or f.suffix not in tuple(suffixes):
                 continue
             target = dst / f.relative_to(src)
             if target.exists():
@@ -93,14 +101,15 @@ class ResultsSync:
         return n
 
     def push(self, results_dir: str = "results", suffixes: Iterable[str] = ARTIFACT_SUFFIXES,
-             message: Optional[str] = None, retries: int = 3) -> int:
-        """Copy artifacts from ``results_dir`` into ``<label>/`` and push. Returns files copied."""
+             message: Optional[str] = None, retries: int = 3, ckpt_max_bytes: int = CKPT_MAX_BYTES) -> int:
+        """Copy artifacts (and checkpoints up to ``ckpt_max_bytes``) from ``results_dir`` into ``<label>/``
+        and push. Returns files copied."""
         src = Path(results_dir)
         dst = self.dir / self.label
         dst.mkdir(parents=True, exist_ok=True)
         n = 0
         for f in sorted(src.rglob("*")):
-            if not f.is_file() or f.suffix not in suffixes:
+            if not f.is_file() or not _wanted(f, suffixes, ckpt_max_bytes):
                 continue
             target = dst / f.relative_to(src)
             if target.exists() and target.stat().st_size == f.stat().st_size and target.read_bytes() == f.read_bytes():

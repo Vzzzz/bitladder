@@ -28,11 +28,11 @@ Windows-копия репозитория служит зеркалом для �
 В клоне WSL нельзя запускать `git clean` / `reset --hard` (в нём живут venv, данные,
 чекпоинты). Перед GPU-работой в WSL остановить стенд skull-assistant:
 `systemctl --user stop skull.target` (его ollama держит ~4 ГБ VRAM). Окружение
-skull-assistant не трогать. Длинные свипы можно гонять в Google Colab: `colab/kws.ipynb`. Результаты прогонов (JSON, MD, PNG, CSV)
+skull-assistant не трогать. Длинные свипы можно гонять в Google Colab или Kaggle: `colab/kws.ipynb` (ячейки `run_once` пропускают готовые прогоны). Результаты прогонов (JSON, MD, PNG, CSV)
 уходят в приватный репозиторий `Vzzzz/bitladder-results` через `bitladder/results_sync.py`:
 в Colab токен в секрете `RESULTS_TOKEN` (ячейка S), локально `RESULTS_TOKEN=... python -m
-bitladder.results_sync --repo Vzzzz/bitladder-results --label local-rtx3080 results`. Чекпоинты `.pt`
-туда не идут. Раскладка: `<label>/<name>.json`, label = `colab-<дата>` или `local-<машина>`.
+bitladder.results_sync --repo Vzzzz/bitladder-results --label local-rtx3080 results`. Чекпоинты `.pt` до 2 МБ
+тоже идут (наши 0.1–0.5 МБ), чтобы новая сессия продолжала с места обрыва (`sync.restore`). Раскладка: `<label>/<name>.json`, label = `colab-<дата>` или `local-<машина>`.
 
 **Данные** в `~/bitladder/data/` (gitignored): `speech_commands_v2/` (105 835 wav, 35 слов
 плюс `_background_noise_`), `speech_commands_test_v2/` (официальный тест на 12 классов,

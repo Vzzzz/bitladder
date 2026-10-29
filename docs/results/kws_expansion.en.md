@@ -100,3 +100,12 @@ Same machine, same torch, new Colab session: every row within σ (e.g. k=16 fp32
 2.68 ± 0.31 % vs 2.68 ± 0.28 %). Different machine (RTX 3080 Laptop, torch 2.14): 4.5 %
 for the configuration that gives 2.7 % on the T4. Machine-to-machine spread exceeds seed
 spread, so rows are compared only within one environment.
+
+## Base size is the lever (one seed, 2026-10-29, preliminary)
+
+Same branch (k=16 depthwise-separable, 4-bit, 9.5 KB) on a DS-CNN 128×6 base (115k
+parameters, 69 KB at 4 bits, 55 MMAC) gives 1.7 % FRR versus 7.7 % on the 64×4 base. On the
+big base, branches that tap only the last blocks stay cheap: k=16 with 4 taps 6.3 KB → 2.1 %,
+k=8 with 3 taps 2.2 KB → 4.1 %, k=8 with 2 taps 1.4 KB → 5.2 %. Time stride 1 on the small
+base halves the branch error (4.7 %) at twice the MACs. One seed and one word pair so far;
+three seeds and the second pair are queued (section 9 of the Russian report).
