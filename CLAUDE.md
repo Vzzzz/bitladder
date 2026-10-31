@@ -84,7 +84,7 @@ MNIST (свип по MNIST не нужен); `tests/` 39 тестов, вклю�
    матрица устройств: RTX 3080 Laptop, Galaxy S25 Ultra, Jetson Orin Nano 8 ГБ, STM32.
 7. ADR-010: литобзор в `docs/PUBLICATIONS.md` по формату skull-assistant (записи P-NNN).
 8. ADR-012: брелок с анекдотами (ESP32-S3, LM + голос) живёт в отдельном приватном
-   репозитории `joke-keychain` (GPL-3), bitladder там зависимость.
+   репозитории `micro-trakhtenberg` (GPL-3), bitladder там зависимость.
 
 ## Соглашения
 
