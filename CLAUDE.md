@@ -28,7 +28,7 @@ Windows-копия репозитория служит зеркалом для �
 В клоне WSL нельзя запускать `git clean` / `reset --hard` (в нём живут venv, данные,
 чекпоинты). Перед GPU-работой в WSL остановить стенд skull-assistant:
 `systemctl --user stop skull.target` (его ollama держит ~4 ГБ VRAM). Окружение
-skull-assistant не трогать. Длинные свипы можно гонять в Google Colab или Kaggle: `colab/kws.ipynb` (ячейки `run_once` пропускают готовые прогоны). Результаты прогонов (JSON, MD, PNG, CSV)
+skull-assistant не трогать. Длинные свипы можно гонять в Google Colab или Kaggle: `colab/kws.ipynb` (ячейки `run_once` пропускают готовые прогоны), лесенка на MNIST отдельно в `colab/mnist.ipynb` (один сплошной прогон, по ширине за `run_once`). Результаты прогонов (JSON, MD, PNG, CSV)
 уходят в приватный репозиторий `Vzzzz/bitladder-results` через `bitladder/results_sync.py`:
 в Colab токен в секрете `RESULTS_TOKEN` (ячейка S), локально `RESULTS_TOKEN=... python -m
 bitladder.results_sync --repo Vzzzz/bitladder-results --label local-rtx3080 results`. Чекпоинты `.pt` до 2 МБ
@@ -65,7 +65,7 @@ FRR при FAR 1 %; `--neg cv` калибрует пороги на Common Voice
 `bitladder/results_sync.py` отправка JSON/MD/PNG в репозиторий результатов после каждого прогона; `bitladder/measure/` байты после упаковки, MACs, BOPs, анализатор слоёв;
 `bitladder/cli.py` общие аргументы квантования; `audio/kws/` features (log-mel без
 torchaudio), cache, data, model (DS-CNN), checkpoint, run, expand, analyze, cv_negatives; `colab/kws.ipynb`; `sandbox_mnist/` разогрев на
-MNIST (свип по MNIST не нужен); `tests/` 39 тестов, включая конвейер данных KWS на
+MNIST (свип по MNIST идёт только в раздел sandbox_mnist, не в README); `tests/` 39 тестов, включая конвейер данных KWS на
 синтетическом мини-датасете и анализатор слоёв.
 
 ## Ключевые решения

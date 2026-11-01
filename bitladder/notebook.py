@@ -27,7 +27,9 @@ def run(cmd: str, show: Iterable[str] = SHOW_PREFIXES, tail: int = 30, cwd: Opti
     show = tuple(show)
     print(f"$ {cmd}", flush=True)
     env = {**os.environ, "PYTHONUNBUFFERED": "1"}   # otherwise a piped python child flushes only at exit
-    proc = subprocess.Popen(shlex.split(cmd), cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    # stderr is merged into stdout: a separate stderr pipe that is read only at exit fills up (64 KB) under
+    # tqdm download bars or a flood of warnings, the child blocks on write and the cell hangs forever.
+    proc = subprocess.Popen(shlex.split(cmd), cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             text=True, bufsize=1)
     out_lines = []
     assert proc.stdout is not None
@@ -35,10 +37,9 @@ def run(cmd: str, show: Iterable[str] = SHOW_PREFIXES, tail: int = 30, cwd: Opti
         out_lines.append(line)
         if line.startswith(show):
             print(line, end="", flush=True)
-    err = proc.stderr.read() if proc.stderr else ""
     rc = proc.wait()
     if rc != 0:
-        log = "".join(out_lines) + err
+        log = "".join(out_lines)
         sys.stdout.write("\n".join(log.splitlines()[-tail:]) + "\n")
         sys.stdout.flush()
         if check:

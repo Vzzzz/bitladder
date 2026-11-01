@@ -18,6 +18,14 @@ def test_run_fails_loudly(capsys):
     assert "partial" in capsys.readouterr().out
 
 
+def test_run_does_not_hang_on_a_chatty_stderr(capsys):
+    """A child that floods stderr (tqdm bars, warnings) beyond the pipe buffer must not deadlock the cell."""
+    code = "import sys; sys.stderr.write('x' * 200_000 + chr(10)); sys.stderr.write('E boom' + chr(10)); sys.exit(2)"
+    with pytest.raises(RuntimeError):
+        run(f'{sys.executable} -c "{code}"', tail=1)
+    assert capsys.readouterr().out.rstrip().endswith("E boom")
+
+
 def test_run_no_check_returns_output():
     out = run(f'{sys.executable} -c "import sys; print(\'bye\'); sys.exit(1)"', check=False)
     assert "bye" in out
