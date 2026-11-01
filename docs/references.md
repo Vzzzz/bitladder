@@ -70,3 +70,4 @@
 
 ### Инженерия памяти на MCU (обзорное)
 - P-010 esp32-ai: LM 28.9M в 4 битах и коннектом мухи на ESP32-S3. https://github.com/slvDev/esp32-ai
+- P-011 HOPE: Hilbert Operator for Progressive Encoding (Mobahi, Bartlett, 2026). https://arxiv.org/abs/2607.21366 · ревью: https://arxiviq.substack.com/p/hilbert-operator-for-progressive
