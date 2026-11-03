@@ -19,30 +19,40 @@ Jetson Orin Nano on the keyword.
 
 Inspired by [ViT-1.58b: Mobile Vision Transformers in the 1-bit Era](https://arxiv.org/abs/2406.18051).
 
-## Results so far (2026-10-25)
+## Results so far (2026-11-03)
 
-Keyword spotting on Google Speech Commands v2 with a DS-CNN 64×4 (23k parameters, 10.6 MMAC):
+Keyword spotting on Google Speech Commands v2 with a DS-CNN 64×4 (23k parameters, 10.6 MMAC),
+Colab T4, three seeds where ± σ is given:
 
 | what | number |
 |---|---|
-| 12-class accuracy, official test set | **95.0 %** (Hello Edge, DS-CNN S: 94.4 %) |
-| base model after 4-bit QAT | 16 KB instead of 90 KB, same accuracy |
-| **a new keyword added to a frozen base** (branch ≤ 10k params, ternary weights) | **1.5 KB of flash** at 8.6 % FRR, or **4.2 KB** at 6.6 % (FAR 1 %, two word pairs, 3 seeds) |
+| 12-class accuracy, official test set, fp32 | **95.2 %** (Hello Edge, DS-CNN S: 94.4 %) |
+| bit ladder of the same model (QAT, first/last layer 8-bit) | 4-bit: **95.2 % in 16 KB**; ternary: **92.5 % in 10.6 KB**; 2-bit: 88.2 % in 11.5 KB; binary: 84.5 % in 9.2 KB |
+| a new keyword added to a frozen 64×4 base (branch ≤ 10k params) | 4.2 KB at 6.6 % FRR (4-bit) or 1.5 KB at 8.6 % (ternary), two word pairs |
+| a new keyword on a 128×6 base (69 KB at 4 bits, 55 MMAC) | **6.3 KB at 4.3 ± 2.1 %**, 2.2 KB at 5.3 ± 1.8 %, 1.4 KB at 6.6 ± 1.8 % (FAR 1 %, two pairs, 3 seeds) |
 
 *Modular expansion* reproduces [Yandex, Interspeech 2026](https://arxiv.org/abs/2607.19918):
 the base network is frozen and only a small branch is trained per new keyword. The
-ordering of methods from the paper holds (branch < separate model < head-only). What the
-paper does not have: 4-bit QAT of the base is free; ternary branch weights cost 1–4 FRR
-points and hit depthwise convolutions first, which the layer analyzer confirms
-independently. The paper reports 4.37 % over five word pairs with an int8 branch of about 10 KB. The paper's core-first arbitration rule
-does not survive unseen, acoustically close keywords, and calibrating thresholds on hard
-negatives (Common Voice) does not fix it. Tables, protocol and open questions in English:
-[docs/results/kws_expansion.en.md](docs/results/kws_expansion.en.md); full working notes in Russian:
-[docs/results/kws_expansion_2026-10-23.md](docs/results/kws_expansion_2026-10-23.md).
+ordering of methods from the paper holds (branch < separate model < head-only); the paper's
+4.37 % over five pairs with an int8 branch of about 10 KB is reached with a 6.3 KB branch on
+the 128×6 base. What the paper does not have: the main lever is the size of the base, not
+of the branch; 4-bit QAT of the base is free (three seeds); distilling the small base from the
+big one gives it +0.3 points and its branch −0.9 FRR points at the same bytes; ternary branch
+weights cost 2.5 points for half the bytes and hit depthwise convolutions first; mixed
+precision from the layer analyzer adds nothing while 4 bits are free. The paper's core-first
+arbitration rule does not survive unseen, acoustically close keywords, and calibrating
+thresholds on hard negatives (Common Voice) does not fix it. Tables, protocol and open
+questions in English: [docs/results/kws_expansion.en.md](docs/results/kws_expansion.en.md);
+full working notes in Russian: [docs/results/kws_expansion_2026-10-23.md](docs/results/kws_expansion_2026-10-23.md).
+
+The ternary 12-class model is both smaller and four points more accurate than the 2-bit one,
+the ViT-1.58b picture on a model four orders of magnitude smaller; below 4 bits the byte ladder
+hits the floor set by the 8-bit first and last layers (about 3.5 KB).
 
 One-shot layer sensitivity of the 12-class model (accuracy drop in points when only that
 layer is quantized / pruned, no retraining): 8 and 4 bits are free everywhere; depthwise
 layers are fragile; pointwise layers tolerate 50 % unstructured sparsity almost for free.
+QAT recovers almost everything the one-shot analysis predicts lost.
 [Report](docs/results/kws12_layer_analysis_2026-10-24.md).
 
 ![layer sensitivity heatmap](docs/results/kws12_sensitivity_2026-10-24.png)

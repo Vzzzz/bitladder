@@ -2,7 +2,7 @@
 
 Summary in English of the Russian working notes
 [kws_expansion_2026-10-23.md](kws_expansion_2026-10-23.md) (full protocol, all tables).
-Dates: 2026-10-23 … 2026-10-25. Code: [`audio/kws/expand.py`](../../audio/kws/expand.py),
+Dates: 2026-10-23 … 2026-11-03. Code: [`audio/kws/expand.py`](../../audio/kws/expand.py),
 notebook [`colab/kws.ipynb`](../../colab/kws.ipynb).
 
 ## What was reproduced
@@ -101,11 +101,51 @@ Same machine, same torch, new Colab session: every row within σ (e.g. k=16 fp32
 for the configuration that gives 2.7 % on the T4. Machine-to-machine spread exceeds seed
 spread, so rows are compared only within one environment.
 
-## Base size is the lever (one seed, 2026-10-29, preliminary)
+## Base size is the lever (three seeds, two pairs, 2026-11-03)
 
-Same branch (k=16 depthwise-separable, 4-bit, 9.5 KB) on a DS-CNN 128×6 base (115k
-parameters, 69 KB at 4 bits, 55 MMAC) gives 1.7 % FRR versus 7.7 % on the 64×4 base. On the
-big base, branches that tap only the last blocks stay cheap: k=16 with 4 taps 6.3 KB → 2.1 %,
-k=8 with 3 taps 2.2 KB → 4.1 %, k=8 with 2 taps 1.4 KB → 5.2 %. Time stride 1 on the small
-base halves the branch error (4.7 %) at twice the MACs. One seed and one word pair so far;
-three seeds and the second pair are queued (section 9 of the Russian report).
+Same branch family on a DS-CNN 128×6 base (115k parameters, 69 KB at 4 bits, 55 MMAC,
+97.6–97.7 % on its own task) instead of 64×4. Branches tap only the last blocks, are
+depthwise-separable and 4-bit; FRR at FAR 1 %, mean ± σ over three seeds, last column over
+both pairs (six runs). Sections 9 of the Russian report.
+
+| branch | params | bytes | {stop, go} | {on, off} | both pairs |
+|---|---|---|---|---|---|
+| k=16, 4 taps | 11 183 | 6 268 | 2.5 ± 0.5 | 6.1 ± 0.9 | **4.3 ± 2.1 %** |
+| k=8, 3 taps | 3 836 | 2 172 | 3.8 ± 0.1 | 6.9 ± 0.8 | **5.3 ± 1.8 %** |
+| k=8, 2 taps | 2 521 | 1 428 | 5.1 ± 1.1 | 8.1 ± 0.5 | **6.6 ± 1.8 %** |
+
+The paper's 4.37 % (five pairs, ~10 KB int8 per word) is reached with a 6.3 KB branch; 2.2 KB
+costs one point. Against the 64×4 base (4.2 KB at 6.6 %, 1.5 KB at 8.6 %) the big base buys
+two points at the same branch, for 69 KB and 55 MMAC of base. {on, off} stays harder than
+{stop, go} on the big base too (6.1 vs 2.5 %), and the big base reproduces worse across
+sessions (1.7 vs 3.2 % for one configuration, all of it on "go"), so only seed means are
+reported.
+
+## Methods on the small base (three seeds, 2026-11-03)
+
+64×4 base, pair {stop, go}, k=16 separable 4-bit branch (4 220 bytes). Knowledge distillation
+from the 128×6 teacher gives the 4-bit base 96.0 ± 0.1 % instead of 95.7 ± 0.1 % at the same
+16 040 bytes and the branch 4.8 ± 1.7 % instead of 5.7 ± 1.6 % FRR (better or equal on every
+seed). A ternary branch (TWN, the best of absmean / TWN / TTQ) halves the branch to 2 142 bytes
+at 8.2 ± 2.0 %: the one-seed win reported earlier was noise. Mixed precision from the layer
+analyzer buys nothing here because uniform 4 bits are already free. The branch is undertrained:
+on one seed, 40 epochs at lr 3e-3 give 4.3 % where the standard 20 epochs give 7.8 %, so all
+branch numbers above are probably one to three points pessimistic (section 11).
+
+## Bit ladder on the 12-class model (official test set, one seed, 2026-11-03)
+
+DS-CNN 64×4, QAT 15 epochs from the fp32 checkpoint, first and last layer at 8 bits, PACT 8-bit
+activations. Hello Edge DS-CNN S: 94.4 %.
+
+| weights | accuracy | bytes |
+|---|---|---|
+| fp32 | 95.2 % | 90 392 |
+| uniform 8-bit | 95.6 % | 25 520 |
+| uniform 4-bit | 95.2 % | 16 176 |
+| uniform 2-bit | 88.2 % | 11 504 |
+| ternary (1.58) | **92.5 %** | **10 576** |
+| binary (1) | 84.5 % | 9 168 |
+
+The ternary network is both smaller and four points more accurate than the 2-bit one, the
+ViT-1.58b picture on a model four orders of magnitude smaller. Below 4 bits the byte ladder
+flattens: the 8-bit stem and classifier with their scales set a floor of about 3.5 KB.
