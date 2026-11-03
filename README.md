@@ -85,7 +85,7 @@ results/              артефакты прогонов (в git не вход�
 - [docs/hardware.md](docs/hardware.md): Jetson, микроконтроллер, аудио.
 - [docs/stm32_deploy.md](docs/stm32_deploy.md): пошаговое развёртывание wake word на STM32F407G-DISC1.
 - [docs/references.md](docs/references.md): стартовый список статей и инструментов.
-- [CLAUDE.md](CLAUDE.md): контекст для агента, с которым ведётся разработка; заодно
+- [AGENTS.md](AGENTS.md): контекст для агента, с которым ведётся разработка; заодно
   актуальный статус проекта и ближайшие шаги.
 
 ## Быстрый старт
@@ -124,4 +124,4 @@ python audio/kws/analyze.py --run results/base8.json                  # табл
 
 ## Статус
 
-Фаза 1, трек wake word. Следующие шаги в [CLAUDE.md](CLAUDE.md), раздел «Ближайшие шаги».
+Фаза 1, трек wake word. Следующие шаги в [AGENTS.md](AGENTS.md), раздел «Ближайшие шаги».
