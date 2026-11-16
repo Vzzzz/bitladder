@@ -2,7 +2,7 @@
 
 Summary in English of the Russian working notes
 [kws_expansion_2026-10-23.md](kws_expansion_2026-10-23.md) (full protocol, all tables).
-Dates: 2026-10-23 … 2026-11-03. Code: [`audio/kws/expand.py`](../../audio/kws/expand.py),
+Dates: 2026-10-23 … 2026-11-04. Code: [`audio/kws/expand.py`](../../audio/kws/expand.py),
 notebook [`colab/kws.ipynb`](../../colab/kws.ipynb).
 
 ## What was reproduced
@@ -149,3 +149,22 @@ activations. Hello Edge DS-CNN S: 94.4 %.
 The ternary network is both smaller and four points more accurate than the 2-bit one, the
 ViT-1.58b picture on a model four orders of magnitude smaller. Below 4 bits the byte ladder
 flattens: the 8-bit stem and classifier with their scales set a floor of about 3.5 KB.
+
+## Common Voice calibration on the big base (three seeds, two pairs, 2026-11-04)
+
+Block B of `colab/kws_full.ipynb`: the same fp32 128×6 bases and 4-bit branches as above,
+20 epochs, but thresholds calibrated at 1 % FAR on held-out Common Voice test windows instead
+of GSC negatives (`--neg cv`, no Common Voice in training). Artifacts: `colab-2026-11-04/`.
+
+| branch | bytes | {stop, go} | {on, off} | both pairs |
+|---|---:|---:|---:|---:|
+| k=16, 4 taps | 6 268 | 5.6 ± 0.3 % | 6.2 ± 0.1 % | **5.9 ± 0.4 %** |
+| k=8, 3 taps | 2 172 | 7.5 ± 1.9 % | 7.2 ± 1.4 % | **7.3 ± 1.5 %** |
+| k=8, 2 taps | 1 428 | 9.2 ± 2.9 % | 7.6 ± 0.1 % | **8.4 ± 2.0 %** |
+
+For the best branch, the harder calibration distribution gives 5.9 % FRR instead of 4.3 % on
+GSC-calibrated thresholds; these are different operating points, not a regression of one fixed
+metric. Across all 18 same-architecture, same-seed pairs, CV calibration adds 1.8 FRR points on
+average. It also reduces core firing on new words from 57.9 to 37.9 % on {stop, go} and from
+59.4 to 42.1 % on {on, off}, but hard-gated FRR remains 41.6 / 44.7 %, far worse than the
+ungated branch. Core-first arbitration therefore remains rejected for this deployment.
