@@ -6,6 +6,7 @@ import pytest
 import torch
 
 from bitladder.models import TinyCNN
+from bitladder.prune import apply_magnitude_pruning
 from bitladder.quant import QuantConfig, apply_quantization
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -51,3 +52,16 @@ def test_export_matches_pytorch(tmp_path):
     with torch.no_grad():
         ref = prepared(x).numpy()
     assert np.abs(out - ref).max() < 1e-4
+
+
+def test_pruned_export_preserves_mask():
+    torch.manual_seed(0)
+    model = TinyCNN(width=8, bn=False)
+    apply_quantization(model, QuantConfig(scheme="uniform", wbits=4, first_last_bits=None))
+    apply_magnitude_pruning(model, 0.75, "conv2")
+    model.eval()
+    x = torch.randn(2, 1, 28, 28)
+    prepared, _ = prepare_for_export(model, x[:1])
+    assert prepared.conv2.masked_weight()[~prepared.conv2.weight_mask].eq(0).all()
+    with torch.no_grad():
+        assert torch.allclose(prepared(x), model(x), atol=1e-5)

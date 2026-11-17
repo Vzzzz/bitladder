@@ -26,6 +26,7 @@ from audio.kws.data import KEYWORDS10, KWSCache, KWSDataset, KWSOfficialTest  # 
 from audio.kws.model import DSCNN  # noqa: E402
 from bitladder.cli import add_quant_args, quant_config  # noqa: E402
 from bitladder.measure import count_bops, count_macs, model_size_report  # noqa: E402
+from bitladder.prune import apply_magnitude_pruning, load_state_with_masks, pruning_report  # noqa: E402
 from bitladder.quant import apply_quantization  # noqa: E402
 from bitladder.train import cap_workers, evaluate, fit, pick_device  # noqa: E402
 
@@ -49,6 +50,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--batch-size", type=int, default=256)
     p.add_argument("--workers", type=int, default=4)
     p.add_argument("--no-augment", action="store_true")
+    p.add_argument("--prune", type=float, default=0.0,
+                   help="fixed unstructured magnitude sparsity before fine-tuning (0 disables)")
+    p.add_argument("--prune-layers", default="blocks.*.pw", help="comma-separated layer name patterns")
     p.add_argument("--init", default=None, help="state_dict to start from (e.g. fp32 checkpoint before QAT)")
     p.add_argument("--teacher", default=None, help="result JSON of a trained run used as a KD teacher (logits)")
     p.add_argument("--kd-alpha", type=float, default=0.7)
@@ -89,10 +93,13 @@ def run(args: argparse.Namespace) -> dict:
     model = DSCNN(channels=args.channels, blocks=args.blocks, num_classes=len(train_ds.classes),
                   time_stride=args.time_stride)
     if args.init:
-        model.load_state_dict(torch.load(args.init, map_location="cpu"), strict=False)
+        load_state_with_masks(model, torch.load(args.init, map_location="cpu"), strict=False)
+    pruned = apply_magnitude_pruning(model, args.prune, args.prune_layers)
     apply_quantization(model, cfg)
     n_params = sum(p.numel() for p in model.parameters())
     log(f"[{cfg.label}] DSCNN(c={args.channels}, blocks={args.blocks}) params={n_params} device={device}")
+    if pruned:
+        log(f"pruning: {[(r['name'], round(r['sparsity'], 4)) for r in pruned]}")
 
     t0 = time.time()
     teacher = None
@@ -116,7 +123,8 @@ def run(args: argparse.Namespace) -> dict:
     shape = (1, cache.frames, cache.n_mels)
     macs, bops = count_macs(model, shape), count_bops(model, shape)
 
-    name = args.name or f"kws_dscnn{args.channels}x{args.blocks}_{cfg.label}_s{args.seed}"
+    prune_tag = "" if not args.prune else f"_prune{100 * args.prune:g}"
+    name = args.name or f"kws_dscnn{args.channels}x{args.blocks}_{cfg.label}{prune_tag}_s{args.seed}"
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
     torch.save(model.state_dict(), out_dir / f"{name}.pt")
@@ -125,10 +133,13 @@ def run(args: argparse.Namespace) -> dict:
         "keywords": keywords, "exclude": exclude, "classes": train_ds.classes,
         "channels": args.channels, "blocks": args.blocks, "time_stride": args.time_stride,
         "teacher": args.teacher, "overrides": cfg.overrides,
+        "pruning": {"sparsity": args.prune, "layers": args.prune_layers,
+                    "masked_layers": pruning_report(model)},
         "epochs": args.epochs, "seed": args.seed,
         "val_acc": val["acc"], "test_acc": test["acc"],
         "official_test_acc": None if official is None else official["acc"],
         "train_time_s": train_time, "total_params": size["total_params"],
+        "nonzero_params": size["nonzero_params"], "mask_bytes": size["mask_bytes"],
         "total_bytes": size["total_bytes"], "zlib_bytes": size["zlib_bytes"],
         "fp32_bytes": size["fp32_bytes"], "mean_wbits": size["mean_wbits"],
         "macs": sum(macs.values()), "bops": sum(bops.values()),
@@ -137,8 +148,8 @@ def run(args: argparse.Namespace) -> dict:
     (out_dir / f"{name}.json").write_text(json.dumps(result, indent=2))
     off = "n/a" if official is None else f"{official['acc']:.4f}"
     log(f"RESULT {name}: val={val['acc']:.4f} test={test['acc']:.4f} official={off} "
-        f"params={size['total_params']} bytes={size['total_bytes']} zlib={size['zlib_bytes']} "
-        f"MACs={sum(macs.values()):,} train={train_time:.0f}s")
+        f"params={size['total_params']} nonzero={size['nonzero_params']} bytes={size['total_bytes']} "
+        f"mask={size['mask_bytes']} zlib={size['zlib_bytes']} MACs={sum(macs.values()):,} train={train_time:.0f}s")
     return result
 
 

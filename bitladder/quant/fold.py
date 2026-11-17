@@ -78,7 +78,7 @@ def fold_batchnorm(model: nn.Module, example: torch.Tensor, inplace: bool = Fals
         else:
             conv.bias.copy_(new_bias)
         if conv.wq is not None:
-            conv.wq.init_from(conv.weight)  # learnable quantizers re-initialise on the folded weights
+            conv.wq.init_from(conv.masked_weight())  # learnable quantizers re-initialise on folded weights
         parent_name, _, attr = bn_name.rpartition(".")
         parent = modules[parent_name] if parent_name else model
         setattr(parent, attr, nn.Identity())

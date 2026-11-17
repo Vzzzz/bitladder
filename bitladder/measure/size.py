@@ -5,6 +5,7 @@ Accounting rules (see docs/decision-log.md, ADR-005):
 * quantized weights: integer codes packed at ``bits`` per weight; ternary codes are
   packed five per byte (3^5 = 243 <= 256), binary eight per byte;
 * float layers: 4 bytes (fp32) or 2 bytes (fp16) per weight;
+* pruned weights: only nonzero values plus a one-bit-per-weight bitmap; scales and biases stay dense;
 * scales: fp16, one per output channel (per-channel) or one per tensor;
 * biases: fp16 per output channel;
 * BatchNorm: folded into a per-channel fp16 scale and fp16 bias, 4 bytes per channel.
@@ -66,12 +67,17 @@ def unpack_ternary(data: bytes, count: int) -> np.ndarray:
     return digits[:count] - 1
 
 
-def _pack_weight(w: torch.Tensor, wq, bits: float) -> Tuple[bytes, bytes]:
-    """Packed weight bytes and fp16 scale bytes for one weight tensor."""
+def _pack_weight(w: torch.Tensor, wq, bits: float, mask=None) -> Tuple[bytes, bytes]:
+    """Packed nonzero weight bytes and fp16 scale bytes for one weight tensor."""
+    if mask is not None:
+        w = w * mask
     if wq is None:
         dtype = np.float32 if bits == 32 else np.float16
-        return w.cpu().numpy().astype(dtype).tobytes(), b""
+        values = w if mask is None else w[mask]
+        return values.cpu().numpy().astype(dtype).tobytes(), b""
     q, scale = wq.integer_repr(w)
+    if mask is not None:
+        q = q[mask]
     q = q.cpu().numpy()
     if math.isclose(bits, TERNARY_BITS):
         weight_bytes = pack_ternary(q)
@@ -87,17 +93,22 @@ def _pack_weight(w: torch.Tensor, wq, bits: float) -> Tuple[bytes, bytes]:
 def _layer_payload(layer) -> Dict[str, object]:
     """Return packed bytes for one QuantConv2d / QuantConv1d / QuantLinear."""
     w = layer.weight.detach()
-    weight_bytes, scale_bytes = _pack_weight(w, layer.wq, layer.wbits)
+    mask = getattr(layer, "weight_mask", None)
+    weight_bytes, scale_bytes = _pack_weight(w, layer.wq, layer.wbits, mask)
     bias_bytes = b"" if layer.bias is None else layer.bias.detach().cpu().numpy().astype(np.float16).tobytes()
+    mask_payload = b"" if mask is None else pack_uint(mask.cpu().numpy().astype(np.uint64), 1)
+    nonzero_params = w.numel() if mask is None else int(mask.sum())
     return {
         "params": w.numel(),
+        "nonzero_params": nonzero_params,
         "out_channels": w.shape[0],
         "wbits": layer.wbits,
         "abits": layer.abits,
         "weight_bytes": len(weight_bytes),
         "scale_bytes": len(scale_bytes),
         "bias_bytes": len(bias_bytes),
-        "payload": weight_bytes + scale_bytes + bias_bytes,
+        "mask_bytes": len(mask_payload),
+        "payload": weight_bytes + scale_bytes + bias_bytes + mask_payload,
     }
 
 
@@ -136,7 +147,8 @@ def model_size_report(model: nn.Module) -> Dict[str, object]:
             info = _gru_payload(m) if isinstance(m, QuantGRU) else _layer_payload(m)
             payload += info.pop("payload")
             info["name"] = name
-            info["total_bytes"] = info["weight_bytes"] + info["scale_bytes"] + info["bias_bytes"]
+            info["total_bytes"] = (info["weight_bytes"] + info["scale_bytes"] + info["bias_bytes"]
+                                   + info.get("mask_bytes", 0))
             layers.append(info)
         elif isinstance(m, nn.modules.batchnorm._BatchNorm):
             bn_bytes += 4 * m.num_features
@@ -145,11 +157,15 @@ def model_size_report(model: nn.Module) -> Dict[str, object]:
         elif len(list(m.children())) == 0:
             other_params += sum(p.numel() for p in m.parameters(recurse=False))
     quant_params = sum(int(rec["params"]) for rec in layers)
+    nonzero_params = sum(int(rec.get("nonzero_params", rec["params"])) for rec in layers)
+    mask_bytes = sum(int(rec.get("mask_bytes", 0)) for rec in layers)
     total_bytes = sum(int(rec["total_bytes"]) for rec in layers) + bn_bytes
     total_params = sum(p.numel() for p in model.parameters())
     return {
         "layers": layers,
         "quant_params": quant_params,
+        "nonzero_params": nonzero_params,
+        "mask_bytes": mask_bytes,
         "bn_bytes": bn_bytes,
         "bn_params": bn_params,
         "other_params": other_params,

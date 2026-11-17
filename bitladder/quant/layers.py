@@ -34,13 +34,25 @@ class _QuantMixin:
         self.wq = wq
         self.aq = aq
         if wq is not None:
-            wq.init_from(self.weight)
+            wq.init_from(self.masked_weight())
             self.storage_bits = wq.bits
         else:
             self.storage_bits = 32.0 if storage_bits is None else storage_bits
 
+    def set_weight_mask(self, mask: torch.Tensor) -> None:
+        mask = mask.detach().to(device=self.weight.device, dtype=torch.bool)
+        if "weight_mask" in self._buffers:
+            self.weight_mask = mask
+        else:
+            self.register_buffer("weight_mask", mask.clone())
+
+    def masked_weight(self) -> torch.Tensor:
+        mask = getattr(self, "weight_mask", None)
+        return self.weight if mask is None else self.weight * mask
+
     def quantized_weight(self) -> torch.Tensor:
-        return self.weight if self.wq is None else self.wq(self.weight)
+        w = self.masked_weight()
+        return w if self.wq is None else self.wq(w)
 
     @property
     def wbits(self) -> float:

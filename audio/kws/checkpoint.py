@@ -11,6 +11,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from audio.kws.model import DSCNN  # noqa: E402
+from bitladder.prune import load_state_with_masks  # noqa: E402
 from bitladder.quant import QuantConfig, apply_quantization  # noqa: E402
 
 
@@ -20,7 +21,7 @@ def load_run(json_path: str, freeze: bool = False) -> Tuple[DSCNN, dict]:
     model = DSCNN(channels=meta["channels"], blocks=meta["blocks"], num_classes=len(meta["classes"]),
                   time_stride=meta.get("time_stride", 2))
     apply_quantization(model, QuantConfig(**meta["config"]))
-    model.load_state_dict(torch.load(Path(json_path).with_suffix(".pt"), map_location="cpu"))
+    load_state_with_masks(model, torch.load(Path(json_path).with_suffix(".pt"), map_location="cpu"))
     model.eval()
     if freeze:
         for p in model.parameters():

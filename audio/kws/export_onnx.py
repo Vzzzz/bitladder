@@ -34,7 +34,7 @@ def bake_quantizers(model: nn.Module) -> int:
     n = 0
     for _, m in quant_layers(model):
         if m.wq is not None:
-            m.weight.copy_(m.wq(m.weight))
+            m.weight.copy_(m.quantized_weight())
             n += 1
     for _, m in model.named_modules():
         if isinstance(m, QuantGRU) and m.wq:
