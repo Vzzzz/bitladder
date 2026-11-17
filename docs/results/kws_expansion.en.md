@@ -2,7 +2,7 @@
 
 Summary in English of the Russian working notes
 [kws_expansion_2026-10-23.md](kws_expansion_2026-10-23.md) (full protocol, all tables).
-Dates: 2026-10-23 … 2026-11-04. Code: [`audio/kws/expand.py`](../../audio/kws/expand.py),
+Dates: 2026-10-23 … 2026-11-17. Code: [`audio/kws/expand.py`](../../audio/kws/expand.py),
 notebook [`colab/kws.ipynb`](../../colab/kws.ipynb).
 
 ## What was reproduced
@@ -168,3 +168,19 @@ metric. Across all 18 same-architecture, same-seed pairs, CV calibration adds 1.
 average. It also reduces core firing on new words from 57.9 to 37.9 % on {stop, go} and from
 59.4 to 42.1 % on {on, off}, but hard-gated FRR remains 41.6 / 44.7 %, far worse than the
 ungated branch. Core-first arbitration therefore remains rejected for this deployment.
+
+## Forty epochs for the best branch (three seeds, two pairs, 2026-11-17)
+
+Block G repeats the best fp32-base / 4-bit-branch configuration at 40 epochs, lr 3e-3, with
+the same held-out Common Voice calibration at 1 % FAR. Artifacts: `colab-2026-11-17/`.
+
+| epochs | {stop, go} | {on, off} | both pairs | branch bytes |
+|---:|---:|---:|---:|---:|
+| 20 | 5.6 ± 0.3 % | 6.2 ± 0.1 % | **5.9 ± 0.4 %** | 6 268 |
+| 40 | 5.3 ± 0.4 % | 5.2 ± 0.3 % | **5.3 ± 0.3 %** | 6 268 |
+
+Doubling training buys 0.6 FRR points on average at unchanged inference cost. The gain is
+consistent on {on, off} (1.0 point on every seed), but only 0.3 points on {stop, go}, with one
+seed unchanged. The earlier one-seed improvement therefore does not generalize to a uniform
+one-to-two-point gain. The epochs / learning-rate grid is now closed; the next lever is base
+compression rather than another branch sweep.
