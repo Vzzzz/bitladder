@@ -19,7 +19,7 @@ Jetson Orin Nano on the keyword.
 
 Inspired by [ViT-1.58b: Mobile Vision Transformers in the 1-bit Era](https://arxiv.org/abs/2406.18051).
 
-## Results so far (2026-11-03)
+## Results so far (2026-11-18)
 
 Keyword spotting on Google Speech Commands v2 with a DS-CNN 64×4 (23k parameters, 10.6 MMAC),
 Colab T4, three seeds where ± σ is given:
@@ -28,6 +28,7 @@ Colab T4, three seeds where ± σ is given:
 |---|---|
 | 12-class accuracy, official test set, fp32 | **95.2 %** (Hello Edge, DS-CNN S: 94.4 %) |
 | bit ladder of the same model (QAT, first/last layer 8-bit) | 4-bit: **95.2 % in 16 KB**; ternary: **92.5 % in 10.6 KB**; 2-bit: 88.2 % in 11.5 KB; binary: 84.5 % in 9.2 KB |
+| 50% pointwise pruning + 4-bit, one seed | **95.0 % in 14.1 KB** including the bitmap; dense 4-bit: 95.2 % in 16.2 KB |
 | a new keyword added to a frozen 64×4 base (branch ≤ 10k params) | 4.2 KB at 6.6 % FRR (4-bit) or 1.5 KB at 8.6 % (ternary), two word pairs |
 | a new keyword on a 128×6 base (69 KB at 4 bits, 55 MMAC) | **6.3 KB at 4.3 ± 2.1 %**, 2.2 KB at 5.3 ± 1.8 %, 1.4 KB at 6.6 ± 1.8 % (FAR 1 %, two pairs, 3 seeds) |
 
