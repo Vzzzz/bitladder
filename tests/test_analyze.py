@@ -1,4 +1,5 @@
 import copy
+import math
 
 import torch
 from torch.utils.data import DataLoader, TensorDataset
@@ -7,7 +8,9 @@ from bitladder.measure import (
     activation_stats,
     analysis_report,
     apply_probe,
+    hope_capacity,
     sensitivity,
+    spearman,
     to_markdown,
     weight_stats,
 )
@@ -81,3 +84,26 @@ def test_sensitivity_and_report():
     rep = analysis_report(model, eval_fn, loader, probes, max_batches=1)
     md = to_markdown(rep)
     assert "| conv1 |" in md and "sparsity0.9" in md and "Baseline metric" in md
+
+
+def test_hope_capacity_uses_bn_moments_and_outgoing_norms():
+    model, _ = _model_and_data()
+    with torch.no_grad():
+        model.bn1.weight.fill_(2.0)
+        model.bn1.bias.fill_(1.0)
+    x = torch.randn(2, 1, 28, 28)
+    rep = hope_capacity(model, x)
+    z = 0.5
+    second_moment = 5.0 * (0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))) + 2.0 * math.exp(-0.5 * z * z) / math.sqrt(
+        2.0 * math.pi)
+    expected = second_moment * model.conv2.weight[:, 0].norm().item() ** 2
+    assert rep[0]["name"] == "conv1" and len(rep[0]["capacity"]) == 8
+    assert math.isclose(rep[0]["capacity"][0], expected, rel_tol=1e-5)
+    assert len(rep) == 3  # hidden conv layers; fc has no outgoing hidden-neuron slice
+
+
+def test_spearman_handles_direction_ties_and_constants():
+    assert math.isclose(spearman([1, 2, 3], [10, 20, 30]), 1.0)
+    assert math.isclose(spearman([1, 2, 3], [30, 20, 10]), -1.0)
+    assert math.isclose(spearman([1, 1, 2, 2], [1, 2, 3, 4]), 0.8944271909999, rel_tol=1e-9)
+    assert math.isnan(spearman([1, 1, 1], [1, 2, 3]))

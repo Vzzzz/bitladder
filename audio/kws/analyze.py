@@ -4,6 +4,7 @@ one-shot sensitivity to lower bits / channel pruning / unstructured sparsity.
 python audio/kws/analyze.py --run results/kws12_fp32_s0.json
 python audio/kws/analyze.py --run results/kws12_fp32_s0.json --probes bits:8,4,2 ternary prune:0.25,0.5 sparsity:0.5,0.8
 python audio/kws/analyze.py --run results/base8_unk1_fp32_s0.json --split test --batches 20 --no-heatmap
+python audio/kws/analyze.py --run results/kws12_fp32_s0.json --hope --out results/kws12_fp32_s0_hope
 
 Writes results/<name>_analysis.json, results/<name>_analysis.md and results/<name>_sensitivity.png.
 """
@@ -16,6 +17,7 @@ import sys
 from pathlib import Path
 from typing import List, Tuple
 
+import torch
 from torch.utils.data import DataLoader
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -51,6 +53,7 @@ def main() -> None:
     p.add_argument("--workers", type=int, default=2)
     p.add_argument("--device", default="auto")
     p.add_argument("--no-heatmap", action="store_true")
+    p.add_argument("--hope", action="store_true", help="add HOPE channel capacity and Spearman with channel pruning")
     p.add_argument("--out", default=None, help="output stem; defaults to results/<run name>_analysis")
     args = p.parse_args()
 
@@ -67,7 +70,9 @@ def main() -> None:
         m.to(device)
         return evaluate(m, loader, device)["acc"]
 
-    rep = analysis_report(model, eval_fn, loader, parse_probes(args.probes), device, args.batches, log=print)
+    example = torch.zeros(1, 1, cache.frames, cache.n_mels, device=device) if args.hope else None
+    rep = analysis_report(model, eval_fn, loader, parse_probes(args.probes), device, args.batches, log=print,
+                          example=example)
     rep["run"] = meta["name"]
     rep["split"] = args.split
     stem = Path(args.out) if args.out else Path(args.run).parent / f"{meta['name']}_analysis"

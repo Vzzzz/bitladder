@@ -8,6 +8,7 @@ from .analyze import (
     weight_stats,
 )
 from .flops import count_bops, count_macs
+from .hope import hope_capacity, hope_spearman, spearman
 from .size import model_size_report, pack_ternary, pack_uint, unpack_ternary, unpack_uint
 
 __all__ = [
@@ -18,6 +19,9 @@ __all__ = [
     "sensitivity",
     "to_markdown",
     "weight_stats",
+    "hope_capacity",
+    "hope_spearman",
+    "spearman",
     "model_size_report",
     "pack_ternary",
     "pack_uint",

@@ -85,7 +85,9 @@ Colab воспроизводит сам себя в пределах σ на 64�
 битности по слоям (`QuantConfig.overrides`, маски fnmatch), тернарные режимы absmean / twn / ttq,
 `fold.py` сворачивание BatchNorm; `bitladder/prune.py` фиксированный unstructured-прунинг по модулю
 с масками в чекпоинтах (`run.py --prune`, `--prune-layers`); `bitladder/measure/size.py` упаковка только
-ненулевых весов плюс bitmap один бит на исходный вес; `bitladder/measure/mixed.py` жадный профиль смешанной точности
+ненулевых весов плюс bitmap один бит на исходный вес; `bitladder/measure/hope.py` ёмкость каналов
+по HOPE из β/γ BatchNorm и нормы выходного среза, Spearman с channel pruning (`analyze.py --hope`);
+`bitladder/measure/mixed.py` жадный профиль смешанной точности
 по отчёту анализатора (`--mixed-from`, `--mixed-budget`); `bitladder/train.py` дистилляция логитов
 (`--teacher` в run.py); `bitladder/distill.py` дистилляция эмбеддингов без меток;
 `bitladder/results_sync.py` отправка JSON/MD/PNG в репозиторий результатов после каждого прогона; `bitladder/measure/` байты после упаковки, MACs, BOPs, анализатор слоёв;
@@ -152,7 +154,8 @@ python sandbox_mnist/run.py --scheme ternary --abits 8 --epochs 2    # разо�
 2. Блок H (50 / 70 % pointwise + 4 бита) выполнен в Colab 2026-11-18: 50 % даёт 95.0 %
    в 14.1 КБ с bitmap, 70 % — 93.4 % в 12.5 КБ (один сид; `kws12_layer_analysis_2026-10-24.md`).
    Следующий эксперимент: ёмкость каналов по HOPE (P-011) против чувствительности к прунингу
-   каналов; затем ужать 8-битные stem и fc на 12 классах.
+   каналов; в `colab/kws_full.ipynb` подготовлен блок I (64×4 и 128×6, анализ без обучения).
+   Затем ужать 8-битные stem и fc на 12 классах.
 3. Литобзор: партия 2 (P-002…P-009) сделана 2026-10-25, P-010 и P-011 (HOPE, прунинг без данных) добавлены по одной; следующая партия: обзор
    квантования для MCU (arXiv 2508.15008), Larq / LCE, BitNet / ViT-1.58b.
 4. Данные для своего слова «Костян»: синтетика TTS, аугментации, реальные записи для теста.

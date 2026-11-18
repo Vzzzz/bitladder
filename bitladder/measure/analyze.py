@@ -200,12 +200,18 @@ def sensitivity(model: nn.Module, eval_fn: Callable[[nn.Module], float], probes:
 def analysis_report(model: nn.Module, eval_fn: Optional[Callable[[nn.Module], float]] = None,
                     loader: Optional[Iterable] = None, probes: Sequence[Probe] = (),
                     device: Optional[torch.device] = None, max_batches: int = 10,
-                    log: Callable[[str], None] = lambda s: None) -> Dict[str, object]:
+                    log: Callable[[str], None] = lambda s: None,
+                    example: Optional[torch.Tensor] = None) -> Dict[str, object]:
     rep: Dict[str, object] = {"weights": [asdict(s) for s in weight_stats(model)]}
     if loader is not None:
         rep["activations"] = [asdict(s) for s in activation_stats(model, loader, device, max_batches)]
     if eval_fn is not None and probes:
         rep["sensitivity"] = sensitivity(model, eval_fn, probes, log=log)
+    if example is not None:
+        from .hope import hope_capacity, hope_spearman
+        rep["hope"] = hope_capacity(model, example)
+        if "sensitivity" in rep:
+            rep["hope_spearman"] = hope_spearman(rep)
     return rep
 
 
@@ -217,6 +223,15 @@ def to_markdown(rep: Dict[str, object]) -> str:
         lines.append(f"| {s['name']} | {s['kind']} | {s['params']} | {s['out_channels']} | {s['wbits']:g} | "
                      f"{s['abs_mean']:.4f} | {100*s['near_zero_frac']:.1f} % | {100*s['ternary_zero_frac']:.1f} % | "
                      f"{s['chan_norm_min_over_median']:.2f} | {s['chan_norm_cv']:.2f} |")
+    if "hope" in rep:
+        lines += ["", "| layer | HOPE mean | HOPE median | HOPE min | HOPE max |",
+                  "|---|---:|---:|---:|---:|"]
+        for h in rep["hope"]:
+            lines.append(f"| {h['name']} | {h['mean']:.3g} | {h['median']:.3g} | {h['min']:.3g} | {h['max']:.3g} |")
+    if "hope_spearman" in rep:
+        lines += ["", "| channel pruning probe | Spearman: mean HOPE capacity vs accuracy drop |", "|---|---:|"]
+        for h in rep["hope_spearman"]:
+            lines.append(f"| {h['probe']} | {h['spearman']:.3f} |")
     if "activations" in rep:
         lines += ["", "| layer | input zeros | input abs mean | output abs mean | dead out channels |",
                   "|---|---|---|---|---|"]
