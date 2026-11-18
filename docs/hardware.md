@@ -67,13 +67,32 @@ wake-word движок Espressif WakeNet.
 перебивать, пока он говорит. AEC работает, только если микрофоны и динамик на одном
 устройстве.
 
-Кандидат: **Seeed ReSpeaker Lite** (XMOS XU316, 2 микрофона, дальнее поле до 3 м,
-AEC, подавление шума, AGC, подавление помех, USB или I2S). Проверить наличие выхода на
-динамик у выбранной версии. Запасной вариант: USB-спикерфон.
+**Заказана 2026-11-18: Seeed ReSpeaker XVF3800 USB 4-Mic Array**, ожидается в течение
+одной-двух недель. Четыре PDM-микрофона, AEC, beamforming, DNN noise suppression,
+de-reverberation, DoA, VAD и AGC. Есть выходы AUX 3.5 мм и JST на динамик, USB и I2S,
+поэтому требование AEC на одном устройстве с динамиком выполнимо.
 
-В SC7 USB-устройства Jetson обесточены, поэтому у MCU свой микрофон.
+Прошивка обновляется по USB DFU или I2C, есть recovery через Safe Mode. Source release XMOS
+позволяет добавлять свой DSP в far-end и post-processing и свои control-команды / GPIO, но
+встроенный voice-DSP изменяется только через опубликованный API: произвольную замену его
+DNN нашей моделью не предполагаем. Три GPI и пять GPO дают аппаратную возможность внешнего
+триггера, но для wake word нужна своя модель на XVF3800 или на XIAO ESP32-S3, а подключение
+к Jetson требует проверки уровней и схемы. Это не drop-in замена STM32. Нужно подтвердить,
+какой вариант заказан: с XIAO ESP32-S3 или без него.
 
-Источник: https://wiki.seeedstudio.com/ja/reSpeaker_usb_v3/
+Роли в проекте: аудиофронтенд для ASR и оценка WER до/после обработки, запись raw 6-channel
+и processed audio для SE, VAD / DoA и светодиодная индикация для Костяна. После прибытия сначала
+проверить USB-форматы, AEC с динамиком, чтение VAD / DoA и управление GPIO.
+
+Источники:
+- https://wiki.seeedstudio.com/respeaker_xvf3800_introduction/
+- https://www.xmos.com/documentation/XM-014888-PC/html/modules/fwk_xvf/doc/user_guide/05_building_the_firmware.html
+- https://www.xmos.com/documentation/XM-014888-PC/html/modules/fwk_xvf/doc/programming_guide/05_modifying_the_software.html
+
+В SC7 USB-устройства Jetson обесточены, поэтому у внешнего триггера должны быть независимые
+питание и микрофон.
+
+Прежний кандидат: Seeed ReSpeaker Lite (XMOS XU316). Запасной вариант: USB-спикерфон.
 
 ## Ориентировочная корзина
 
