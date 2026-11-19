@@ -2,7 +2,7 @@
 
 Summary in English of the Russian working notes
 [kws_expansion_2026-10-23.md](kws_expansion_2026-10-23.md) (full protocol, all tables).
-Dates: 2026-10-23 … 2026-11-17. Code: [`audio/kws/expand.py`](../../audio/kws/expand.py),
+Dates: 2026-10-23 … 2026-11-19. Code: [`audio/kws/expand.py`](../../audio/kws/expand.py),
 notebook [`colab/kws.ipynb`](../../colab/kws.ipynb).
 
 ## What was reproduced
@@ -184,3 +184,15 @@ consistent on {on, off} (1.0 point on every seed), but only 0.3 points on {stop,
 seed unchanged. The earlier one-seed improvement therefore does not generalize to a uniform
 one-to-two-point gain. The epochs / learning-rate grid is now closed; the next lever is base
 compression rather than another branch sweep.
+
+## A third held-out pair (three seeds, 2026-11-19)
+
+Block K trains three new fp32 128×6 bases and evaluates the same 4-bit separable branch for
+40 epochs with Common Voice calibration. {left, right} gives 5.7 / 4.9 / 5.2 % FRR, or
+5.2 ± 0.4 % at 6 268 branch bytes. Across {stop, go}, {on, off} and {left, right}, the mean is
+5.3 ± 0.3 % over nine runs. The third pair confirms this level rather than improving it; left is
+consistently harder than right. Artifacts: `colab-2026-11-19/`.
+
+The separate stem/fc pilot in block J is not a strictly paired accuracy comparison: an accidental
+Run all retrained the fp32 base in the 2026-11-19 label, while the dense 4-bit control still uses
+the earlier checkpoint. A fresh dense control is needed before publishing an edge-compression win.
