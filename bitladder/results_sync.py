@@ -28,7 +28,7 @@ import time
 from pathlib import Path
 from typing import Iterable, Optional
 
-ARTIFACT_SUFFIXES = (".json", ".csv", ".md", ".png", ".txt")
+ARTIFACT_SUFFIXES = (".json", ".csv", ".md", ".png", ".txt", ".blpk")
 CKPT_SUFFIX = ".pt"
 CKPT_MAX_BYTES = 2_000_000   # our KWS checkpoints are 0.1-0.5 MB; anything bigger stays local
 

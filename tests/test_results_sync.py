@@ -47,19 +47,21 @@ def test_push_copies_artifacts_and_small_checkpoints(tmp_path, remote):
     results = tmp_path / "results"
     results.mkdir()
     (results / "a.json").write_text("{}")
+    (results / "a.blpk").write_bytes(b"BLP1-test")
     (results / "a.pt").write_bytes(b"\x00" * 10)       # small checkpoint: goes in
     (results / "big.pt").write_bytes(b"\x00" * 100)    # above the cap: stays local
     (results / "sub").mkdir()
     (results / "sub" / "b.md").write_text("# b")
     sync = ResultsSync("owner/results", "secret-token", "sess1", work_dir=str(tmp_path / "work"))
-    assert sync.push(str(results), ckpt_max_bytes=50) == 3
+    assert sync.push(str(results), ckpt_max_bytes=50) == 4
     assert sync.push(str(results), ckpt_max_bytes=50) == 0  # nothing new
     (results / "a.json").write_text('{"x": 1}')
     assert sync.push(str(results), ckpt_max_bytes=50) == 1
     log = subprocess.run(["git", "log", "--oneline", "main"], cwd=str(remote), capture_output=True, text=True).stdout
     assert log.count("\n") == 3  # init + 2 pushes
     tree = _tree(remote)
-    assert "sess1/a.json" in tree and "sess1/sub/b.md" in tree and "sess1/a.pt" in tree and "sess1/big.pt" not in tree
+    assert "sess1/a.json" in tree and "sess1/a.blpk" in tree and "sess1/sub/b.md" in tree
+    assert "sess1/a.pt" in tree and "sess1/big.pt" not in tree
 
 
 def test_missing_token_raises(tmp_path):

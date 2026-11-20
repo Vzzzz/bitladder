@@ -67,7 +67,7 @@ def unpack_ternary(data: bytes, count: int) -> np.ndarray:
     return digits[:count] - 1
 
 
-def _pack_weight(w: torch.Tensor, wq, bits: float, mask=None) -> Tuple[bytes, bytes]:
+def pack_weight(w: torch.Tensor, wq, bits: float, mask=None) -> Tuple[bytes, bytes]:
     """Packed nonzero weight bytes and fp16 scale bytes for one weight tensor."""
     if mask is not None:
         w = w * mask
@@ -94,7 +94,7 @@ def _layer_payload(layer) -> Dict[str, object]:
     """Return packed bytes for one QuantConv2d / QuantConv1d / QuantLinear."""
     w = layer.weight.detach()
     mask = getattr(layer, "weight_mask", None)
-    weight_bytes, scale_bytes = _pack_weight(w, layer.wq, layer.wbits, mask)
+    weight_bytes, scale_bytes = pack_weight(w, layer.wq, layer.wbits, mask)
     bias_bytes = b"" if layer.bias is None else layer.bias.detach().cpu().numpy().astype(np.float16).tobytes()
     mask_payload = b"" if mask is None else pack_uint(mask.cpu().numpy().astype(np.uint64), 1)
     nonzero_params = w.numel() if mask is None else int(mask.sum())
@@ -117,7 +117,7 @@ def _gru_payload(gru: QuantGRU) -> Dict[str, object]:
     weight_bytes = scale_bytes = b""
     params = 0
     for name, w in gru.weight_tensors():
-        wb, sb = _pack_weight(w.detach(), gru.wq[name] if name in gru.wq else None, gru.wbits)
+        wb, sb = pack_weight(w.detach(), gru.wq[name] if name in gru.wq else None, gru.wbits)
         weight_bytes += wb
         scale_bytes += sb
         params += w.numel()
