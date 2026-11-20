@@ -195,4 +195,8 @@ consistently harder than right. Artifacts: `colab-2026-11-19/`.
 
 The separate stem/fc pilot in block J is not a strictly paired accuracy comparison: an accidental
 Run all retrained the fp32 base in the 2026-11-19 label, while the dense 4-bit control still uses
-the earlier checkpoint. A fresh dense control is needed before publishing an edge-compression win.
+the earlier checkpoint. Block L subsequently supplied the paired control and combined model.
+M then tested the branch on the 4-bit big base: FRR on {stop, go}, seed 0, is 6.13 % against
+4.90 % on the fp32 base. The one-seed pilot therefore does not support calling the 4-bit base free
+for expansion. N's KD student gives 94.36 % instead of 95.17 % for L at the same 12 272 bytes;
+this distillation pilot is negative. O's verified BLP1 artifact is 13 670 bytes including its manifest.
