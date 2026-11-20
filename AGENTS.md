@@ -101,7 +101,8 @@ Colab воспроизводит сам себя в пределах σ на 64�
 (`--teacher` в run.py); `bitladder/distill.py` дистилляция эмбеддингов без меток;
 `bitladder/results_sync.py` отправка JSON/MD/PNG в репозиторий результатов после каждого прогона; `bitladder/measure/` байты после упаковки, MACs, BOPs, анализатор слоёв;
 `bitladder/cli.py` общие аргументы квантования; `audio/kws/` features (log-mel без
-torchaudio), cache, data, model (DS-CNN), checkpoint, run, expand, analyze, cv_negatives; `colab/kws.ipynb`; `sandbox_mnist/` разогрев на
+torchaudio), cache, data, model (DS-CNN), checkpoint, run, expand, analyze, cv_negatives,
+`stream.py` (потоковый ONNX-адаптер PCM → wake-event для интеграции со skull-assistant); `colab/kws.ipynb`; `sandbox_mnist/` разогрев на
 MNIST (свип по MNIST идёт только в раздел sandbox_mnist, не в README); `tests/` 39 тестов, включая конвейер данных KWS на
 синтетическом мини-датасете и анализатор слоёв.
 
@@ -170,8 +171,9 @@ python sandbox_mnist/run.py --scheme ternary --abits 8 --epochs 2    # разо�
    O (packed export); после них следующая прикладная работа — данные своего слова.
 3. Литобзор: партия 2 (P-002…P-009) сделана 2026-10-25, P-010 и P-011 (HOPE, прунинг без данных) добавлены по одной; следующая партия: обзор
    квантования для MCU (arXiv 2508.15008), Larq / LCE, BitNet / ViT-1.58b.
-4. Данные для своего слова «Костян»: синтетика TTS, аугментации, реальные записи для теста;
-   нужен отдельный потоковый адаптер и контракт wake-event для skull-assistant (см. `docs/plan.md`).
+4. Данные для своего слова «Костян»: синтетика TTS, аугментации, реальные записи для теста.
+   Эталонный `audio/kws/stream.py` уже принимает PCM и выдаёт wake-event; production-подключение
+   к аудиопотоку и обработчик события остаются в skull-assistant (см. `docs/plan.md`).
 5. int8 на плате STM32F407G-DISC1 (ADR-011, едет) по `docs/stm32_deploy.md`; блокер — провода для прошивки.
    Скрипты экспорта (`export_onnx.py`, `export_calib.py`, `export_testvector.py`) готовы и проверены;
    проверить на Jetson пробуждение из SC7 кнопкой (ADR-006). На 2026-11-18 заказана ReSpeaker XVF3800
